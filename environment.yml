@@ -1,0 +1,34 @@
+# Conda environment for dualgnn_paper.
+# Install: conda env create -f environment.yml
+#
+# Default torch is the cu128 CUDA build (includes Blackwell / sm_120).
+# For a CPU-only torch, replace the cu128 index-url below with the CPU
+# wheel index: https://download.pytorch.org/whl/cpu
+name: dualgnn
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - cython
+  - numba
+  - numpy
+  - scipy
+  - polars
+  - matplotlib
+  - pytest
+  - setuptools
+  # native libs for CYTools (polytope arithmetic, lattice enumeration)
+  - ppl
+  - python-flint
+  - normaliz
+  - pip
+  - pip:
+    - pplpy
+    - pypalp
+    - regfans
+    - git+https://github.com/LiamMcAllisterGroup/cytools.git
+    - --index-url https://download.pytorch.org/whl/cu128
+    - --extra-index-url https://pypi.org/simple
+    - torch>=2.7
+    - tensorboard
+    - -e .

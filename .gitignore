@@ -1,0 +1,45 @@
+# Python bytecode + caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Numba cache
+*.nbi
+*.nbc
+
+# C/Cython build outputs
+*.so
+*.pyd
+build/
+dist/
+*.egg-info/
+src/dualgnn/reference_samplers/_grow2d/grow2d.c
+src/dualgnn/reference_samplers/_pushing/pushing.c
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# venvs
+.venv/
+venv/
+env/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Tensorboard runs
+runs/
+
+# Generated datasets (regenerable via make_polygons.py / harvest.py)
+polygons.parquet
+fts/
+scripts/polygons.parquet
+scripts/fts/

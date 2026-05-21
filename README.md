@@ -1,9 +1,6 @@
-# dualgnn
+# dualGNN
 
-A small graph-neural-network sampler for fine regular triangulations (FRTs)
-of 2D lattice polygons. Trains the next-simp conditional `P(sigma | T_partial)`
-on a harvested FRT pool (supervised), then fine-tunes toward
-uniform-over-pool with REINFORCE.
+A small graph-neural-network sampler for fine regular triangulations (FRTs) of 2D lattice polygons. Trains the next-simp conditional `P(sigma | T_partial)` on a harvested FRT pool (supervised), then fine-tunes toward uniform-over-pool with REINFORCE.
 
 ## Install
 
@@ -12,8 +9,7 @@ conda env create -f environment.yml
 conda activate dualgnn
 ```
 
-(Or `pip install -e .` if you already have a compatible torch + CYTools
-environment.)
+(Or `pip install -e .` if you already have a compatible torch + CYTools environment.)
 
 ## Inference
 

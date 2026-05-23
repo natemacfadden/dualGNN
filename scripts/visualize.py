@@ -182,8 +182,8 @@ class Visualizer:
         # default bounds = 4, but grow to fit the initial polygon
         init_xmax = max(4, int(initial_pts[:, 0].max()))
         init_ymax = max(4, int(initial_pts[:, 1].max()))
-        self.tb_xmax = TextBox(ax_xmax, "|x_i| <= ", initial=str(init_xmax))
-        self.tb_ymax = TextBox(ax_ymax, "|y_i| <= ", initial=str(init_ymax))
+        self.tb_xmax = TextBox(ax_xmax, "0 <= x_i <= ", initial=str(init_xmax))
+        self.tb_ymax = TextBox(ax_ymax, "0 <= y_i <= ", initial=str(init_ymax))
         self.tb_beta = TextBox(ax_beta, "beta = ",   initial="1.0")
         self.tb_beta.on_submit(self._on_beta_change)
         self.btn_rand = Button(ax_btn, "Random")
@@ -194,7 +194,8 @@ class Visualizer:
         self._norm = LogNorm(vmin=1e-3, vmax=1.0)
         self._sm   = ScalarMappable(norm=self._norm, cmap=plt.cm.viridis)
         self._cb   = self.fig.colorbar(self._sm, ax=self.ax_dual,
-                                       fraction=0.04, pad=0.02)
+                                       fraction=0.04, pad=0.02,
+                                       extend="min")
         self._cb.set_label("model probability (legal simps, log scale)")
 
         # event handlers (attached once; live across polygon swaps)

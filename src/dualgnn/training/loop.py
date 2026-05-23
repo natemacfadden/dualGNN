@@ -64,6 +64,7 @@ from .io                 import (
 from .hparams            import (
     POLYGONS_PARQUET, FTS_DIR, VAL_FRAC, VAL_POLY_FRAC,
 )
+from .state              import PolyState
 from .target_conditional import SimpConditional
 
 
@@ -490,56 +491,8 @@ class Trainer:
 
 
 # =============================================================================
-# 3) Per-polygon state: PolyState + load_poly_state
+# 3) Per-polygon state: load_poly_state (PolyState lives in state.py)
 # =============================================================================
-@dataclass
-class PolyState:
-    """
-    Per-polygon training state. Bundles the polygon's points, its `DualGraph`,
-    the FRT pool (split into train and val), per-split `SimpConditional`s, and
-    pre-uploaded edge tensors. Initialized via `load_poly_state` and cached in
-    `Trainer.states`; subsequently mutated by `explore_polygon` each time it
-    adds novel FRTs (the pool grows; `simp_cond_*` are rebuilt).
-
-    Attributes
-    ----------
-    poly_id : int
-        Polygon ID in the run-local `polygons.parquet`.
-    role : str
-        `"train"` or `"val"`.
-    pts : ndarray
-        `(Npts, 2)` int64 lattice points.
-    cmplx : DualGraph
-        Dual-graph candidate complex for this polygon.
-    N_simps_per_ft : int
-        Number of simps in any FRT of this polygon.
-    train_simps : ndarray
-        `(Ntrain, N_simps_per_ft, 3)` int64. Train-split FRTs.
-    val_simps : ndarray
-        `(Nval, N_simps_per_ft, 3)` int64. Val-split FRTs.
-    simp_cond_train, simp_cond_val : SimpConditional
-        Empirical next-simp conditionals over the train / val pools.
-    circ_features_t, edge_indices_t, simp_compat_t : torch.Tensor
-        Per-polygon graph tensors pre-uploaded to the training device.
-    pool_keys : set[bytes]
-        Canonical-form keys of every FRT in the full (train + val) pool.
-        Used for novel-FRT deduplication during exploration.
-    """
-    poly_id:         int
-    role:            str
-    pts:             np.ndarray
-    cmplx:           DualGraph
-    N_simps_per_ft:  int
-    train_simps:     np.ndarray
-    val_simps:       np.ndarray
-    simp_cond_train: SimpConditional
-    simp_cond_val:   SimpConditional
-    circ_features_t: torch.Tensor
-    edge_indices_t:  torch.Tensor
-    simp_compat_t:   torch.Tensor
-    pool_keys:       set = field(default_factory=set)
-
-
 def load_poly_state(
     poly_id: int, run_polygons: Path, run_fts_dir: Path,
     *, device: str, grow2d_target: int,
@@ -589,12 +542,12 @@ def load_poly_state(
         print(f"[skip] poly {poly_id}: no FRTs harvested")
         return None
 
-    train_simps = all_simps[split == "train"].astype(np.int64)
-    val_simps   = all_simps[split == "val"  ].astype(np.int64)
+    train_triangs = all_simps[split == "train"].astype(np.int64)
+    val_triangs   = all_simps[split == "val"  ].astype(np.int64)
 
     cmplx = DualGraph(pts)
-    simp_cond_train = SimpConditional(train_simps, cmplx.simps)
-    simp_cond_val   = SimpConditional(val_simps,   cmplx.simps)
+    simp_cond_train = SimpConditional(train_triangs, cmplx.simps)
+    simp_cond_val   = SimpConditional(val_triangs,   cmplx.simps)
 
     pool_keys = {canonical_simps(s).tobytes() for s in all_simps}
 
@@ -605,7 +558,7 @@ def load_poly_state(
     return PolyState(
         poly_id=poly_id, role=role, pts=pts, cmplx=cmplx,
         N_simps_per_ft=all_simps.shape[1],
-        train_simps=train_simps, val_simps=val_simps,
+        train_triangs=train_triangs, val_triangs=val_triangs,
         simp_cond_train=simp_cond_train, simp_cond_val=simp_cond_val,
         circ_features_t=circ_features_t, edge_indices_t=edge_indices_t,
         simp_compat_t=simp_compat_t,
@@ -787,7 +740,7 @@ def explore_polygon(
     Parameters
     ----------
     state : PolyState
-        Per-polygon state (mutated: `train_simps` / `val_simps` /
+        Per-polygon state (mutated: `train_triangs` / `val_triangs` /
         `simp_cond_*` / `pool_keys` are updated in place if novels appear).
     net : DualGNN
         Trained-or-training model used for AR rollouts.
@@ -855,23 +808,23 @@ def explore_polygon(
     new_simps_arr = np.stack(new_simps).astype(np.int8)
     new_split_arr = np.array(new_split, dtype=object)
 
-    state.train_simps = np.concatenate([
-        state.train_simps,
+    state.train_triangs = np.concatenate([
+        state.train_triangs,
         new_simps_arr[new_split_arr == "train"].astype(np.int64),
     ])
-    state.val_simps = np.concatenate([
-        state.val_simps,
+    state.val_triangs = np.concatenate([
+        state.val_triangs,
         new_simps_arr[new_split_arr == "val"].astype(np.int64),
     ])
-    state.simp_cond_train = SimpConditional(state.train_simps,
+    state.simp_cond_train = SimpConditional(state.train_triangs,
                                             state.cmplx.simps)
-    state.simp_cond_val   = SimpConditional(state.val_simps,
+    state.simp_cond_val   = SimpConditional(state.val_triangs,
                                             state.cmplx.simps)
 
-    full_simps = np.concatenate([state.train_simps, state.val_simps])
+    full_simps = np.concatenate([state.train_triangs, state.val_triangs])
     full_split = np.array(
-        ["train"] * len(state.train_simps) +
-        ["val"]   * len(state.val_simps),
+        ["train"] * len(state.train_triangs) +
+        ["val"]   * len(state.val_triangs),
         dtype=object,
     )
     save_fts(full_simps.astype(np.int8), full_split,

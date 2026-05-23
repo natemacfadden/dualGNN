@@ -80,6 +80,13 @@ class DualGraph:
         pts : ndarray
             `(Npts, 2)` int. Lattice points of the polygon. Includes interior.
         """
+        if pts is None:
+            raise ValueError(
+                "DualGraph(pts) got pts=None. This usually means an upstream "
+                "call to `enum_lattice_pts` saw a degenerate polygon "
+                "(collinear vertices, <3 unique points, or <3 lattice points "
+                "inside the hull)."
+            )
         self.pts            = np.ascontiguousarray(pts, dtype=np.int64)
         self.simps          = _candidate_simps(pts)
         self.simp_compat    = _simp_compat(self.pts, self.simps)

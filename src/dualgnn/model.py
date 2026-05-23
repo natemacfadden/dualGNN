@@ -31,7 +31,7 @@ import torch.nn as nn
 
 # main model class
 # ================
-class Layer(nn.Module):
+class _Layer(nn.Module):
     """
     One round of message passing on dualGNN's graph.
 
@@ -140,7 +140,7 @@ class DualGNN(nn.Module):
     The dualGNN model: AR sampler of simplices for uniform sampling of
     fine regular triangulations. Analogous to a Pointer Network.
 
-    Stack of `K` `Layer`s with a shared (per-polygon) dual-graph structure.
+    Stack of `K` `_Layer`s with a shared (per-polygon) dual-graph structure.
 
     Output is one logit per candidate simp; downstream code applies log-softmax
     over the candidate axis to get a distribution over which simp to place next.
@@ -150,7 +150,7 @@ class DualGNN(nn.Module):
     D : int, optional
         Hidden state dimension. Default 32.
     K : int, optional
-        Number of `Layer` rounds. Default 16.
+        Number of `_Layer` rounds. Default 16.
     """
 
     def __init__(self, *, D=32, K=16):
@@ -172,7 +172,7 @@ class DualGNN(nn.Module):
 
         # message passing/simplex selection data
         self.layers = nn.ModuleList(
-            [Layer(D) for _ in range(K)]
+            [_Layer(D) for _ in range(K)]
         )
         self.norm = nn.LayerNorm(D)
         self.head = nn.Linear(D, 1)
@@ -215,7 +215,7 @@ class DualGNN(nn.Module):
         """
         Score the next simp to place for each batch element. Does so via
             1) initializing hidden states via `init_mlp(metadata)`,
-            2) running `K` `Layer` message passing rounds,
+            2) running `K` `_Layer` message passing rounds,
             3) projecting to a single logit per simp, and then
             4) masking placed / illegal entries to `-inf`.
 

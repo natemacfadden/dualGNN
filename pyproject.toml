@@ -22,7 +22,6 @@ dependencies = [
 
 [project.optional-dependencies]
 train = ["tensorboard"]
-test = ["pytest"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

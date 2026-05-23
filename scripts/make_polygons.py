@@ -33,10 +33,6 @@ from dualgnn.training.polygons import (
 from dualgnn.training.hparams  import VAL_POLY_FRAC
 
 
-HERE        = Path(__file__).resolve().parent
-DEFAULT_OUT = HERE / "polygons.parquet"
-
-
 if __name__ == "__main__":
     # CLI
     p = argparse.ArgumentParser(
@@ -49,7 +45,7 @@ if __name__ == "__main__":
     p.add_argument("--max-attempts",  type=int,   default=MAX_ATTEMPTS)
     p.add_argument("--val-poly-frac", type=float, default=VAL_POLY_FRAC)
     p.add_argument("--seed",          type=int,   default=0)
-    p.add_argument("--out",           type=Path,  default=DEFAULT_OUT)
+    p.add_argument("--out",           type=Path,  default=Path("polygons.parquet"))
 
     # generate random polygons
     write_random_polygons(**vars(p.parse_args()))

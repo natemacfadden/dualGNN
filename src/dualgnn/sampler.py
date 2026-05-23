@@ -43,7 +43,7 @@ def sample(
     batch_size: int = 256,
     beta:       float = 1.0,
     seed:       int | None = None,
-    verbosity:  int = 0,
+    verbose:    bool = True,
 ) -> np.ndarray:
     """
     Generate `Ntriangs` triangulations from the dualGNN sampler.
@@ -69,8 +69,8 @@ def sample(
         grow2d); `beta<0` samples model-unlikely triangulations.
     seed : int, optional
         Seed for the random number generator.
-    verbosity : int, optional
-        The verbosity level. Higher is more verbose.
+    verbose : bool, optional
+        Print a warning when `beta != 1.0`. Default True.
 
     Returns
     -------
@@ -84,9 +84,9 @@ def sample(
     if device is None:
         device = next(net.parameters()).device
 
-    if verbosity >= 0 and beta != 1.0:
+    if verbose and beta != 1.0:
         print(f"beta = {beta}... set to 1 for uniform sampling...")
-        print( "disable warning with verbosity<=-1")
+        print( "disable warning with verbose=False")
 
     if seed is None:
         gen = None
@@ -103,8 +103,9 @@ def sample(
 
     # sample
     # ------
-    canon     = np.empty((Ntriangs, N_simps_per_ft, 3), dtype=np.int8)
-    simp_keys = dualgraph.simps.astype(np.int8)
+    dtype     = np.int8 if dualgraph.pts.shape[0] <= 128 else np.int16
+    canon     = np.empty((Ntriangs, N_simps_per_ft, 3), dtype=dtype)
+    simp_keys = dualgraph.simps.astype(dtype)
     N_out     = 0
 
     net.eval() # turn training mode off

@@ -33,14 +33,22 @@ from ..geometry import random_lattice_polygon
 from .hparams   import VAL_POLY_FRAC
 
 
+# defaults
+# ========
+NPOLYS_PER_BUCKET = 3
+NPTS_MIN          = 5
+NPTS_MAX          = 40
+MAX_ATTEMPTS      = 50_000
+
+
 # main method
 # ===========
 def write_random_polygons(
     *,
-    Npolys_per_bucket: int   = 3,
-    Npts_min:          int   = 5,
-    Npts_max:          int   = 40,
-    max_attempts:      int   = 50_000,
+    Npolys_per_bucket: int   = NPOLYS_PER_BUCKET,
+    Npts_min:          int   = NPTS_MIN,
+    Npts_max:          int   = NPTS_MAX,
+    max_attempts:      int   = MAX_ATTEMPTS,
     val_poly_frac:     float = VAL_POLY_FRAC,
     seed:              int   = 0,
     out:               Path  = Path("polygons.parquet"),

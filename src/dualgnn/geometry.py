@@ -23,6 +23,7 @@
 import ctypes
 import math
 import signal
+import threading
 import warnings
 
 import numba
@@ -143,15 +144,27 @@ def enum_lattice_pts(verts: np.ndarray) -> np.ndarray | None:
     # compute the hull
     v = np.unique(verts, axis=0)
     if len(v) < 3:
+        warnings.warn(
+            f"enum_lattice_pts: only {len(v)} unique vertex(es); need >= 3 "
+            f"to form a 2D polygon. Returning None."
+        )
         return None
     try:
         hull = ConvexHull(v)
-    except Exception:
+    except Exception as e:
+        warnings.warn(
+            f"enum_lattice_pts: ConvexHull failed ({type(e).__name__}: {e}); "
+            f"input is likely collinear or otherwise degenerate. Returning None."
+        )
         return None
 
     # ensure sufficiently high dimension (2D)
     hull_v = v[hull.vertices]
     if np.linalg.matrix_rank(hull_v - hull_v[0]) < 2:
+        warnings.warn(
+            "enum_lattice_pts: hull is rank-deficient (vertices lie on a "
+            "common line). Returning None."
+        )
         return None
 
     # filter the bounding box lattice points (in hull iff all CCW edges
@@ -169,6 +182,11 @@ def enum_lattice_pts(verts: np.ndarray) -> np.ndarray | None:
 
     # return
     if len(pts) < 3:
+        warnings.warn(
+            f"enum_lattice_pts: only {len(pts)} lattice point(s) inside the "
+            f"hull of {len(hull_v)} vertices; need >= 3 to triangulate. "
+            f"Returning None."
+        )
         return None
     return np.asarray(pts, dtype=np.int64)
 
@@ -302,8 +320,12 @@ def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool:
     def raise_timeout(signum, frame):
         raise TimeoutError("is_regular hung")
 
-    old = signal.signal(signal.SIGALRM, raise_timeout)
-    signal.alarm(60)
+    # SIGALRM only works in the main thread of the main interpreter; in a
+    # worker thread, skip the watchdog and let regfans run unguarded.
+    have_timeout = threading.current_thread() is threading.main_thread()
+    if have_timeout:
+        old = signal.signal(signal.SIGALRM, raise_timeout)
+        signal.alarm(60)
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("error", module="regfans")
@@ -313,8 +335,9 @@ def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool:
               f"(Npts={len(pts)}, Nsimps={len(simps)})", flush=True)
         return False
     finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old)
+        if have_timeout:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
 
         # fix ppl's rounding bug
         _libc.fesetround(0)

@@ -26,8 +26,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
-from pathlib     import Path
+from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -40,6 +39,7 @@ from ..geometry  import canonical_simps, is_regular
 from ..model     import DualGNN
 from ..sampler   import ar_rollout_batch, sample
 from .io         import load_polygons, save_ckpt
+from .state      import PolyState
 
 
 # training-loop internals (not user-facing)
@@ -119,10 +119,10 @@ def reinforce(
     print(f"[reinforce] {train_df.height} train polys, "
           f"{val_df.height} val polys", flush=True)
 
-    def load_states(df: pl.DataFrame) -> list[RLPolyState]:
-        states = (build_rl_poly_state(r, src_run)
+    def load_states(df: pl.DataFrame) -> list[PolyState]:
+        states = (build_rl_poly_state(r, src_run, device=device)
                   for r in df.iter_rows(named=True))
-        return [s for s in states if len(s.key_to_idx) > 0]
+        return [s for s in states if len(s.pool_keys) > 0]
 
     train_states = load_states(train_df)
     val_states   = load_states(val_df)
@@ -131,14 +131,9 @@ def reinforce(
 
     # init model
     # ----------
-    ckpt = torch.load(init_ckpt, map_location=device, weights_only=False)
-    D    = ckpt["hparams"]["d_model"]
-    K    = ckpt["hparams"]["k_rounds"]
-    net  = DualGNN(D=D, K=K).to(device)
-    sd   = {k.replace("_orig_mod.", ""): v
-            for k, v in ckpt["state_dict"].items()}
-    net.load_state_dict(sd)
-    print(f"[reinforce] init from {init_ckpt} (D={D}, K={K})", flush=True)
+    net = DualGNN.from_ckpt(init_ckpt, device=device).train()
+    print(f"[reinforce] init from {init_ckpt} (D={net.D}, K={net.K})",
+          flush=True)
 
     # run dir + writer
     # ----------------
@@ -195,7 +190,7 @@ def reinforce(
             writer.add_scalar("train/ema_reward",   ema_reward,   step)
             writer.add_scalar("train/regular_rate", regular_rate, step)
             writer.add_scalar("train/ema_regular",  ema_reg,      step)
-            print(f"step {step:>6}  pid={state.pid:>3}  "
+            print(f"step {step:>6}  pid={state.poly_id:>3}  "
                   f"loss {loss:+.4f}  "
                   f"reward_ema {ema_reward:+.3f}  "
                   f"regular_ema {ema_reg:.3f}  "
@@ -229,35 +224,12 @@ def reinforce(
 
 # RL polygon state
 # ================
-@dataclass
-class RLPolyState:
+def build_rl_poly_state(row, src_run, *, device="cpu") -> PolyState:
     """
-    Per-polygon state for REINFORCE. Wraps a `DualGraph` (the candidate complex)
-    with:
-
-    1) a canonical-FRT -> pool-index lookup (`key_to_idx`) so AR draws can
-       be matched against the polygon's FRT pool in O(1) for the KL-vs-
-       uniform validation metric; and
-    2) torch-tensor copies of the graph arrays so the inner training loop
-       can move them to device with one `.to(device)` per step instead of
-       a fresh `from_numpy` round-trip.
-
-    Pool membership (`key_to_idx`) is the only thing not derivable from
-    `cmplx`; everything else is convenience pre-bake.
-    """
-    pid:           int
-    cmplx:         DualGraph
-    key_to_idx:    dict[bytes, int]
-    circ_features: torch.Tensor
-    edge_indices:  torch.Tensor
-    compat:        torch.Tensor
-
-def build_rl_poly_state(row, src_run) -> RLPolyState:
-    """
-    Build an `RLPolyState` for one polygon: derive its `DualGraph` from
-    `row["pts"]`, build the canonical-FRT -> pool-index lookup from the
-    polygon's FRT parquet, and pre-bake the torch-tensor copies of the graph
-    arrays.
+    Build a `PolyState` for REINFORCE: derive the polygon's `DualGraph`
+    from `row["pts"]`, read the canonical-key set of its FRT pool, and
+    pre-bake the per-polygon graph tensors on `device`. SFT-only fields
+    (`train_triangs`, `simp_cond_*`, etc.) are left as `None`.
 
     Parameters
     ----------
@@ -265,29 +237,33 @@ def build_rl_poly_state(row, src_run) -> RLPolyState:
         One row of `polygons.parquet`, with keys `"id"` and `"pts"`.
     src_run : Path
         Run directory containing `fts/poly_{id:04d}.parquet`.
+
+    device : str or torch.device, optional
+        Where to upload `circ_features_t`, `edge_indices_t`,
+        `simp_compat_t`. These are constant per polygon, so we
+        transfer once here rather than repeating the host->device
+        copy every training step. Default `"cpu"`.
     """
     # read inputs
-    pid   = int(row["id"])
-    pts   = np.asarray(row["pts"], dtype=np.int64)
-    fts   = pl.read_parquet(str(src_run / "fts" / f"poly_{pid:04d}.parquet"))
+    poly_id = int(row["id"])
+    pts     = np.asarray(row["pts"], dtype=np.int64)
+    fts     = pl.read_parquet(
+        str(src_run / "fts" / f"poly_{poly_id:04d}.parquet"))
 
-    # construct RLPolyState
     cmplx = DualGraph(pts)
-    
-    key_to_idx: dict[bytes, int] = {}
-    for i, s in enumerate(fts["simps"]):
-        key = canonical_simps(
-            np.asarray(s.to_list(), dtype=np.int8)
-        ).tobytes()
-        key_to_idx[key] = i
 
-    return RLPolyState(
-        pid           = pid,
-        cmplx         = cmplx,
-        key_to_idx    = key_to_idx,
-        circ_features = torch.from_numpy(cmplx.circ_features).float(),
-        edge_indices  = torch.from_numpy(cmplx.edges),
-        compat        = torch.from_numpy(cmplx.simp_compat),
+    pool_keys: set[bytes] = {
+        canonical_simps(np.asarray(s.to_list(), dtype=np.int8)).tobytes()
+        for s in fts["simps"]
+    }
+
+    return PolyState(
+        poly_id         = poly_id,
+        cmplx           = cmplx,
+        pool_keys       = pool_keys,
+        circ_features_t = torch.from_numpy(cmplx.circ_features).float().to(device),
+        edge_indices_t  = torch.from_numpy(cmplx.edges).to(device),
+        simp_compat_t   = torch.from_numpy(cmplx.simp_compat).to(device),
     )
 
 # training helpers
@@ -295,7 +271,7 @@ def build_rl_poly_state(row, src_run) -> RLPolyState:
 def _train_step(
     net,
     optim,
-    state: RLPolyState,
+    state: PolyState,
     *,
     batch:          int,
     beta:           float,
@@ -311,7 +287,7 @@ def _train_step(
         Model in train mode; updated in place.
     optim : torch.optim.Optimizer
         Optimizer holding `net.parameters()`.
-    state : RLPolyState
+    state : PolyState
         Per-polygon state (graph tensors, FRT pool lookup).
 
     batch : int
@@ -331,16 +307,13 @@ def _train_step(
         Fraction of `batch` rollouts that were regular.
     """
     net.train()
-    ef = state.circ_features.to(device, non_blocking=True)
-    ei = state.edge_indices.to(device, non_blocking=True)
-    cm = state.compat.to(device, non_blocking=True)
     placed, log_probs_sum = ar_rollout_batch(
         net,
         batch           = batch,
         N_simps_per_ft  = state.cmplx.N_simps_per_ft,
-        circ_features   = ef,
-        edge_indices    = ei,
-        compat          = cm,
+        circ_features   = state.circ_features_t,
+        edge_indices    = state.edge_indices_t,
+        compat          = state.simp_compat_t,
         device          = device,
         beta            = beta,
         track_log_probs = True,
@@ -402,7 +375,7 @@ def _eval_pass(
     ----------
     net : DualGNN
         Model in eval mode; not modified.
-    val_states : list[RLPolyState]
+    val_states : list[PolyState]
         Per-polygon eval states.
 
     Ntriangs : int
@@ -429,15 +402,15 @@ def _eval_pass(
         )
         if not np.isnan(kl):
             kl_list.append(kl)
-            writer.add_scalar(f"val/poly_{state.pid}/kl",      kl,    step)
-            writer.add_scalar(f"val/poly_{state.pid}/regular", vrate, step)
-        print(f"  [val pid={state.pid:>3}] regular={vrate:.3f}  "
+            writer.add_scalar(f"val/poly_{state.poly_id}/kl",      kl,    step)
+            writer.add_scalar(f"val/poly_{state.poly_id}/regular", vrate, step)
+        print(f"  [val pid={state.poly_id:>3}] regular={vrate:.3f}  "
               f"KL={kl:.4f}  unique={n_uniq}/{Ntriangs}",
               flush=True)
     if kl_list:
         writer.add_scalar("val/mean_kl", float(np.mean(kl_list)), step)
 
-def kl_per_poly(net, state: RLPolyState, Ntriangs, device):
+def kl_per_poly(net, state: PolyState, Ntriangs, device):
     """
     Per-polygon KL of the AR-sampled distribution vs uniform over the pool.
 
@@ -450,7 +423,7 @@ def kl_per_poly(net, state: RLPolyState, Ntriangs, device):
     ----------
     net : DualGNN
         Model (eval mode).
-    state : RLPolyState
+    state : PolyState
         Per-polygon state.
 
     Ntriangs : int
@@ -476,7 +449,7 @@ def kl_per_poly(net, state: RLPolyState, Ntriangs, device):
             continue
         n_reg += 1
         k = out[i].tobytes()
-        if k in state.key_to_idx:
+        if k in state.pool_keys:
             n_pool += 1
             seen_pool[k] = seen_pool.get(k, 0) + 1
     reg_rate = n_reg / Ntriangs
@@ -484,5 +457,5 @@ def kl_per_poly(net, state: RLPolyState, Ntriangs, device):
         return float("nan"), reg_rate, 0
     counts = np.array(list(seen_pool.values()), dtype=np.float64)
     p      = counts / n_pool
-    kl     = float(np.sum(p * np.log(p * len(state.key_to_idx))))
+    kl     = float(np.sum(p * np.log(p * len(state.pool_keys))))
     return kl, reg_rate, len(seen_pool)

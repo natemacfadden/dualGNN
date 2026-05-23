@@ -41,5 +41,6 @@ runs/
 # Generated datasets (regenerable via make_polygons.py / harvest.py)
 polygons.parquet
 fts/
-scripts/polygons.parquet
-scripts/fts/
+
+# Scratch / experiment data (untracked)
+data/

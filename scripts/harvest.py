@@ -32,20 +32,15 @@ from dualgnn.training.io      import fts_path, load_polygons
 from dualgnn.training.hparams import VAL_FRAC
 
 
-HERE             = Path(__file__).resolve().parent
-DEFAULT_POLYGONS = HERE / "polygons.parquet"
-DEFAULT_FTS_DIR  = HERE / "fts"
-
-
 if __name__ == "__main__":
     # CLI
     p = argparse.ArgumentParser(
         description="Harvest one polygon's FRTs from polygons.parquet.",
     )
     p.add_argument("--poly-id",       type=int,   required=True)
-    p.add_argument("--polygons",      type=Path,  default=DEFAULT_POLYGONS,
+    p.add_argument("--polygons",      type=Path,  default=Path("polygons.parquet"),
                    dest="polygons_parquet")
-    p.add_argument("--fts-dir",       type=Path,  default=DEFAULT_FTS_DIR)
+    p.add_argument("--fts-dir",       type=Path,  default=Path("fts"))
     p.add_argument("--max-npts-full-enum", type=int, default=MAX_NPTS_FULL_ENUM)
     p.add_argument("--grow2d-target",      type=int, default=GROW2D_TARGET)
     p.add_argument("--val-frac",      type=float, default=VAL_FRAC)

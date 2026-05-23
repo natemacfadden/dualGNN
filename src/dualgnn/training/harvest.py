@@ -43,43 +43,8 @@ from .hparams    import VAL_FRAC
 MAX_NPTS_FULL_ENUM = 17       # CYTools-full above this -> grow2d
 GROW2D_TARGET      = 10_000
 
-# main methods
-# ============
-def harvest_fts(
-    pts: np.ndarray,
-    *,
-    max_npts_full_enum: int = MAX_NPTS_FULL_ENUM,
-    grow2d_target:      int = GROW2D_TARGET,
-) -> np.ndarray:
-    """
-    Run the full harvest for one polygon. Returns only FRTs.
-
-    The CYTools branch enumerates FRTs directly. The grow2d branch samples fine
-    FTs (regular + irregular) and filters to FRTs post-hoc.
-
-    Parameters
-    ----------
-    pts : ndarray
-        `(Npts, 2)` int. Lattice points of the polygon.
-
-    max_npts_full_enum : int, optional
-        `len(pts) <= max_npts_full_enum` -> CYTools full enumeration; else
-        grow2d sampling. Default `MAX_NPTS_FULL_ENUM`.
-    grow2d_target : int, optional
-        Number of unique fine FTs to gather in the grow2d branch before
-        filtering to FRTs. Default `GROW2D_TARGET`.
-
-    Returns
-    -------
-    simps : ndarray
-        `(Nft, N_simps_per_ft, 3)` int8. FRTs only.
-    """
-    if len(pts) <= max_npts_full_enum:
-        return harvest_full(pts)
-    all_simps = harvest_grow2d(pts, grow2d_target)
-    is_reg    = _classify_regularity(pts, all_simps)
-    return all_simps[is_reg]
-
+# main method
+# ===========
 def bootstrap_fts(
     pts:          np.ndarray,
     parquet_path: Path,
@@ -102,7 +67,8 @@ def bootstrap_fts(
         Per-polygon FRT parquet. Loaded if it exists, else written.
 
     max_npts_full_enum : int, optional
-        CYTools/grow2d cutoff (see `harvest_fts`). Default `MAX_NPTS_FULL_ENUM`.
+        `len(pts) <= max_npts_full_enum` -> CYTools full enumeration; else
+        grow2d sampling + regularity filter. Default `MAX_NPTS_FULL_ENUM`.
     grow2d_target : int, optional
         Number of unique FTs in the grow2d branch. Default `GROW2D_TARGET`.
     val_frac : float, optional
@@ -130,12 +96,12 @@ def bootstrap_fts(
     if verbose:
         print(f"[bootstrap] harvesting FRTs for polygon "
               f"(n_pts={len(pts)}, val_frac={val_frac})...")
-    
-    simps = harvest_fts(
-        pts,
-        max_npts_full_enum=max_npts_full_enum,
-        grow2d_target=grow2d_target,
-    )
+
+    if len(pts) <= max_npts_full_enum:
+        simps = harvest_full(pts)
+    else:
+        all_simps = harvest_grow2d(pts, grow2d_target)
+        simps     = all_simps[_classify_regularity(pts, all_simps)]
 
     # split by train/val
     rng    = np.random.default_rng(split_seed)

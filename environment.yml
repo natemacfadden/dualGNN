@@ -15,6 +15,7 @@ dependencies:
   - scipy
   - polars
   - matplotlib
+  - jupyterlab
   - pytest
   - setuptools
   # native libs for CYTools (polytope arithmetic, lattice enumeration)
@@ -27,8 +28,9 @@ dependencies:
     - pypalp
     - regfans
     - git+https://github.com/LiamMcAllisterGroup/cytools.git
+    - tensorboard
+    # torch with Blackwell-supporting cu128 wheels (see top for CPU alt)
     - --index-url https://download.pytorch.org/whl/cu128
     - --extra-index-url https://pypi.org/simple
     - torch>=2.7
-    - tensorboard
     - -e .

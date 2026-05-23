@@ -24,6 +24,8 @@
 # external imports
 from __future__ import annotations
 
+from collections import defaultdict
+
 import numba
 import numpy as np
 from scipy.spatial import ConvexHull
@@ -93,16 +95,26 @@ class DualGraph:
         self.N_simps_per_ft = _N_simps_per_ft(self.pts)
 
         # directed edges (ordered pairs of facet-sharing compatible simps)
+        # Index simps by their facets so we only consider pairs that already
+        # share one, rather than scanning all N_simps^2 pairs
+        edge_to_simps: dict[tuple[int, int], list[int]] = defaultdict(list)
+        for si, s in enumerate(self.simps):
+            a, b, c = int(s[0]), int(s[1]), int(s[2])
+            edge_to_simps[(a, b)].append(si)
+            edge_to_simps[(a, c)].append(si)
+            edge_to_simps[(b, c)].append(si)
+
         src_list = []
         dst_list = []
-        for si in range(len(self.simps)):
-            for sj in range(si + 1, len(self.simps)):
-                if not self.simp_compat[si, sj]:
-                    continue
-
-                if len(set(self.simps[si]).intersection(self.simps[sj])) == 2:
-                    src_list += [si, sj]
-                    dst_list += [sj, si]
+        for simps_with_edge in edge_to_simps.values():
+            n = len(simps_with_edge)
+            for k1 in range(n):
+                si = simps_with_edge[k1]
+                for k2 in range(k1 + 1, n):
+                    sj = simps_with_edge[k2]
+                    if self.simp_compat[si, sj]:
+                        src_list += [si, sj]
+                        dst_list += [sj, si]
 
         self.edges = np.stack([
             np.asarray(src_list, dtype=np.int64),
@@ -180,16 +192,15 @@ def _candidate_simps(pts: np.ndarray) -> np.ndarray:
 @numba.njit(cache=True)
 def _pair_compat(pts, simps, si, sj):
     """
-    Two simplices `si`, `sj` are compatible iff they can coexist in a
-    triangulation. That is, their interiors do not overlap.
+    Two simplices are compatible iff their interiors do not overlap.
 
-    For each pair of edges `(ei, ej)` from `si` and `sj`, this splits in cases:
-        -) `ei == ej` (shared edge): incompatible iff both simps' apexes lie
-           on the same side of the shared edge,
-        -) shared endpoint but distinct edges: skip (always compatible), or
-        -) fully disjoint: incompatible iff the two open segments cross.
+    Separating Axis Theorem: two convex polygons have disjoint interiors
+    iff some line lies between them. For triangles it suffices to test
+    axes perpendicular to each edge (6 axes total). Non-strict `<=`
+    means triangles that share only an edge or vertex are correctly
+    counted as non-overlapping.
 
-    Note: `si` is incompatible with itself.
+    Note: `si` is incompatible with itself (returns False).
 
     Parameters
     ----------
@@ -204,38 +215,45 @@ def _pair_compat(pts, simps, si, sj):
     -------
     compatible : bool
     """
-    for ki in range(3):
-        ui = simps[si, (ki + 1) % 3]
-        vi = simps[si, (ki + 2) % 3]
+    ax0 = pts[simps[si, 0], 0]; ay0 = pts[simps[si, 0], 1]
+    ax1 = pts[simps[si, 1], 0]; ay1 = pts[simps[si, 1], 1]
+    ax2 = pts[simps[si, 2], 0]; ay2 = pts[simps[si, 2], 1]
+    bx0 = pts[simps[sj, 0], 0]; by0 = pts[simps[sj, 0], 1]
+    bx1 = pts[simps[sj, 1], 0]; by1 = pts[simps[sj, 1], 1]
+    bx2 = pts[simps[sj, 2], 0]; by2 = pts[simps[sj, 2], 1]
 
-        for kj in range(3):
-            uj = simps[sj, (kj + 1) % 3]
-            vj = simps[sj, (kj + 2) % 3]
+    for k in range(6):
+        if   k == 0: nx = ay1 - ay0; ny = ax0 - ax1
+        elif k == 1: nx = ay2 - ay1; ny = ax1 - ax2
+        elif k == 2: nx = ay0 - ay2; ny = ax2 - ax0
+        elif k == 3: nx = by1 - by0; ny = bx0 - bx1
+        elif k == 4: nx = by2 - by1; ny = bx1 - bx2
+        else:        nx = by0 - by2; ny = bx2 - bx0
 
-            same_edge = (ui == uj and vi == vj) or (ui == vj and vi == uj)
-            if same_edge:
-                # shared edge: incompat iff apexes lie on same side
-                wi    = simps[si, ki]
-                wj    = simps[sj, kj]
-                sidei = signed_area2(pts[ui], pts[vi], pts[wi])
-                sidej = signed_area2(pts[ui], pts[vi], pts[wj])
-                if (sidei > 0) == (sidej > 0):
-                    return False
-                continue
+        pa0 = ax0 * nx + ay0 * ny
+        pa1 = ax1 * nx + ay1 * ny
+        pa2 = ax2 * nx + ay2 * ny
+        if pa0 < pa1:
+            min_a = pa0; max_a = pa1
+        else:
+            min_a = pa1; max_a = pa0
+        if pa2 < min_a: min_a = pa2
+        if pa2 > max_a: max_a = pa2
 
-            # different edges: skip if they share an endpoint
-            if ui == uj or ui == vj or vi == uj or vi == vj:
-                continue
+        pb0 = bx0 * nx + by0 * ny
+        pb1 = bx1 * nx + by1 * ny
+        pb2 = bx2 * nx + by2 * ny
+        if pb0 < pb1:
+            min_b = pb0; max_b = pb1
+        else:
+            min_b = pb1; max_b = pb0
+        if pb2 < min_b: min_b = pb2
+        if pb2 > max_b: max_b = pb2
 
-            # proper crossing: c, d on opposite sides of ab AND
-            # a, b on opposite sides of cd
-            a = pts[ui]; b = pts[vi]
-            c = pts[uj]; d = pts[vj]
-            if  (signed_area2(a, c, d) > 0) != (signed_area2(b, c, d) > 0) \
-            and (signed_area2(a, b, c) > 0) != (signed_area2(a, b, d) > 0):
-                return False
+        if max_a <= min_b or max_b <= min_a:
+            return True
 
-    return True
+    return False
 
 @numba.njit(cache=True)
 def _simp_compat(pts, simps):
@@ -257,10 +275,29 @@ def _simp_compat(pts, simps):
     compat : ndarray
         `(Nsimps, Nsimps)` bool, symmetric, diagonal False.
     """
-    N      = simps.shape[0]
+    N = simps.shape[0]
+
+    # bbox pre-filter: disjoint axis-aligned bboxes => no shared point =>
+    # trivially compatible. Skip the expensive geometric check for those
+    x_lo = np.empty(N, dtype=np.int64)
+    x_hi = np.empty(N, dtype=np.int64)
+    y_lo = np.empty(N, dtype=np.int64)
+    y_hi = np.empty(N, dtype=np.int64)
+    for si in range(N):
+        a, b, c = simps[si, 0], simps[si, 1], simps[si, 2]
+        xa = pts[a, 0]; xb = pts[b, 0]; xc = pts[c, 0]
+        ya = pts[a, 1]; yb = pts[b, 1]; yc = pts[c, 1]
+        x_lo[si] = min(xa, min(xb, xc))
+        x_hi[si] = max(xa, max(xb, xc))
+        y_lo[si] = min(ya, min(yb, yc))
+        y_hi[si] = max(ya, max(yb, yc))
+
     compat = ~np.eye(N, dtype=np.bool_)
     for si in range(N):
         for sj in range(si + 1, N):
+            if (x_hi[si] < x_lo[sj] or x_hi[sj] < x_lo[si]
+                    or y_hi[si] < y_lo[sj] or y_hi[sj] < y_lo[si]):
+                continue                              # disjoint bboxes
             if not _pair_compat(pts, simps, si, sj):
                 compat[si, sj] = False
                 compat[sj, si] = False
@@ -291,75 +328,51 @@ def _circ_features(pts, simps, edges):
         in `[my, your, e0, e1]` order.
     """
     Nedges = edges.shape[1]
+    src    = simps[edges[0]]   # (Nedges, 3)
+    dst    = simps[edges[1]]   # (Nedges, 3)
 
-    # output object
-    out = np.empty((Nedges, 4), dtype=np.int32)
+    # match[e, i, j] = (src[e, i] == dst[e, j]): per-edge 3x3 table marking
+    # which src/dst vertex pairs coincide. We use it once to peel off the
+    # unique src ("my"), the unique dst ("your"), and the two shared verts
+    match = (src[:, :, None] == dst[:, None, :])
+    shared_src = match.any(axis=2)
+    shared_dst = match.any(axis=1)
 
-    # build the output
-    for e in range(Nedges):
-        s_src = int(edges[0, e])
-        s_dst = int(edges[1, e])
+    my   = src[~shared_src]
+    your = dst[~shared_dst]
+    v01  = src[shared_src].reshape(Nedges, 2)
+    v0, v1 = v01[:, 0], v01[:, 1]
 
-        # get the role of the points
-        src_verts = {int(v) for v in simps[s_src]}
-        dst_verts = {int(v) for v in simps[s_dst]}
-        shared    = src_verts & dst_verts
-        v0, v1    = shared
+    my_p, your_p = pts[my], pts[your]
+    v0_p, v1_p   = pts[v0], pts[v1]
 
-        my   = (src_verts - shared).pop()
-        your = (dst_verts - shared).pop()
+    # order the shared verts so that signed_area2(my, your, e0) > .(.. e1)
+    a0   = _cross2_batch(my_p, your_p, v0_p)
+    a1   = _cross2_batch(my_p, your_p, v1_p)
+    swap = a0 <= a1
+    e0   = np.where(swap, v1, v0)
+    e1   = np.where(swap, v0, v1)
+    e0_p = pts[e0]
+    e1_p = pts[e1]
 
-        # ensure we have the appropriate ordering
-        area_v0 = signed_area2(pts[my], pts[your], pts[v0])
-        area_v1 = signed_area2(pts[my], pts[your], pts[v1])
-        if area_v0 > area_v1:
-            e0, e1 = v0, v1
-        else:
-            e0, e1 = v1, v0
+    # affine dependence via signed areas of the 3 other points (Cramer)
+    n = np.stack([
+         _cross2_batch(your_p, e0_p, e1_p),
+        -_cross2_batch(my_p,   e0_p, e1_p),
+         _cross2_batch(my_p,   your_p, e1_p),
+        -_cross2_batch(my_p,   your_p, e0_p),
+    ], axis=1).astype(np.int64)
 
-        # store the circuit
-        out[e] = _circ_normal(
-            pts[my], pts[your], pts[e0], pts[e1]
-        )
-    return out
+    # canonicalize sign so n_my >= 0, then reduce by row-wise gcd
+    flip = n[:, 0] < 0
+    n    = np.where(flip[:, None], -n, n)
+    g    = np.gcd.reduce(np.abs(n), axis=1)
+    n   //= g[:, None]
+    return n.astype(np.int32)
 
-def _circ_normal(p_my, p_your, p_e0, p_e1):
-    """
-    Primitive integer affine-dependence vector for 4 points in the plane.
 
-    Any 4 points in R^2 are affinely dependent: there exist integers
-    `n = [n_my, n_your, n_e0, n_e1]`, not all zero, with `sum(n) == 0` and
-    `sum(n_i * p_i) == 0`. The vector is unique up to sign and scale.
+def _cross2_batch(a, b, c):
+    """Batched 2D signed area: `(b - a) x (c - a)` over `(N, 2)` inputs."""
+    return ((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
+          - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0]))
 
-    `n_i` is (up to sign) the signed area of the triangle on the other 3
-    points; we use that identity directly (Cramer's rule). The result is
-    then made primitive (divided by `gcd`) and canonicalized to `n_my >= 0`.
-
-    Parameters
-    ----------
-    p_my, p_your, p_e0, p_e1 : ndarray
-        Length-2 int arrays giving the 2D coordinates of the four points,
-        in the named roles. Convention: `(p_my, p_e0, p_e1)` is one simp
-        and `(p_your, p_e0, p_e1)` is its flip neighbor across edge
-        `(e0, e1)`.
-
-    Returns
-    -------
-    n : ndarray
-        `(4,)` int64 primitive coefficients in role order `[my, your, e0, e1]`.
-        Sums to zero (as an affine dependence).
-    """
-    n = np.array([
-         signed_area2(p_your, p_e0,   p_e1),
-        -signed_area2(p_my,   p_e0,   p_e1),
-         signed_area2(p_my,   p_your, p_e1),
-        -signed_area2(p_my,   p_your, p_e0),
-    ], dtype=np.int64)
-
-    if n[0] < 0:
-        n = -n
-
-    # reduce normal by gcd
-    g = int(np.gcd.reduce(np.abs(n)))
-    n //= g
-    return n

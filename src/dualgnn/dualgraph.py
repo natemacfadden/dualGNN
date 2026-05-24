@@ -292,7 +292,10 @@ def _simp_compat(pts, simps):
         y_lo[si] = min(ya, min(yb, yc))
         y_hi[si] = max(ya, max(yb, yc))
 
-    compat = ~np.eye(N, dtype=np.bool_)
+    # build in place; ~np.eye(N) would peak at 2 * N^2 bytes
+    compat = np.ones((N, N), dtype=np.bool_)
+    for si in range(N):
+        compat[si, si] = False
     for si in range(N):
         for sj in range(si + 1, N):
             if (x_hi[si] < x_lo[sj] or x_hi[sj] < x_lo[si]

@@ -203,6 +203,7 @@ class Visualizer:
         self.fig.canvas.mpl_connect("motion_notify_event",  self._on_motion)
         self.fig.canvas.mpl_connect("button_release_event", self._on_release)
         self.fig.canvas.mpl_connect("key_press_event",      self._on_key)
+        self.fig.canvas.mpl_connect("key_release_event",    self._on_key_release)
         self.fig.suptitle(
             "click a legal node to place that simp; drag to move a node     "
             "[r] reset   [n] sample-step   [q] quit",
@@ -217,6 +218,11 @@ class Visualizer:
         # drag state
         self._drag_idx     = None   # node being grabbed (None = no drag)
         self._drag_started = False  # True once we've moved past threshold
+
+        # held-step state: tick our own timer while n/space is held so we
+        # bypass the OS auto-repeat delay
+        self._step_held  = False
+        self._step_timer = None
 
         self._load_polygon(initial_pts)
 
@@ -551,21 +557,40 @@ class Visualizer:
             print("[reset]", flush=True)
             self._refresh()
         elif event.key in ("n", " "):
-            probs, legal = self._model_probs()
-            if not legal.any():
-                print("[step] no legal simps (triangulation complete)",
-                      flush=True)
-                return
-            probs = probs * legal.astype(probs.dtype)
-            i = int(self.rng.choice(self.N, p=probs / probs.sum()))
-            self.placed[i] = True
-            print(f"[step] sampled simp[{i}]  "
-                  f"({int(self.placed.sum())}/{self.dualgraph.N_simps_per_ft})",
-                  flush=True)
-            self._announce_regularity()
-            self._refresh()
+            if self._step_held:
+                return                    # ignore OS auto-repeat
+            self._step_held = True
+            self._do_step()
+            self._step_timer = self.fig.canvas.new_timer(interval=60)
+            self._step_timer.add_callback(self._do_step)
+            self._step_timer.start()
         elif event.key == "q":
             plt.close(self.fig)
+
+    def _do_step(self):
+        probs, legal = self._model_probs()
+        if not legal.any():
+            print("[step] no legal simps (triangulation complete)",
+                  flush=True)
+            if self._step_timer is not None:
+                self._step_timer.stop()
+                self._step_timer = None
+            return
+        probs = probs * legal.astype(probs.dtype)
+        i = int(self.rng.choice(self.N, p=probs / probs.sum()))
+        self.placed[i] = True
+        print(f"[step] sampled simp[{i}]  "
+              f"({int(self.placed.sum())}/{self.dualgraph.N_simps_per_ft})",
+              flush=True)
+        self._announce_regularity()
+        self._refresh()
+
+    def _on_key_release(self, event):
+        if event.key in ("n", " "):
+            self._step_held = False
+            if self._step_timer is not None:
+                self._step_timer.stop()
+                self._step_timer = None
 
     def _on_beta_change(self, text):
         try:

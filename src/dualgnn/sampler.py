@@ -44,6 +44,7 @@ def sample(
     beta:       float = 1.0,
     seed:       int | None = None,
     verbose:    bool = True,
+    compile:    bool = False,
 ) -> np.ndarray:
     """
     Generate `Ntriangs` triangulations from the dualGNN sampler.
@@ -71,6 +72,11 @@ def sample(
         Seed for the random number generator.
     verbose : bool, optional
         Print a warning when `beta != 1.0`. Default True.
+    compile : bool, optional
+        Wrap `net` with `torch.compile` before sampling. First call pays a
+        ~150 s trace+lower cost but each subsequent AR step is ~1.4x faster.
+        Worth it for batches of ~3+ rollouts on large polygons; not for
+        one-shot small cases. Default False.
 
     Returns
     -------
@@ -83,6 +89,9 @@ def sample(
     # ----------------
     if device is None:
         device = next(net.parameters()).device
+
+    if compile:
+        net = torch.compile(net)
 
     if verbose and beta != 1.0:
         print(f"beta = {beta}... set to 1 for uniform sampling...")
@@ -162,10 +171,25 @@ def compute_legal(
         `(batch_size, Nsimps)` bool. `legal[b, i]` True iff `i` is unplaced AND
         pairwise-compatible with every placed simp in row `b`.
     """
-    placed_f    = placed.float()             # (batch_size, Nsimps)
-    incompat    = (~compat).float()          # (Nsimps, Nsimps)
-    N_conflicts = placed_f @ incompat        # (batch_size, Nsimps): #conflicts
-    return N_conflicts < 0.5 # (0.5 for floating point tolerances)
+    B, N = placed.shape
+    # original path: 4 * N^2 byte float incompat fits in working memory
+    if 4 * N * N <= 2_000_000_000:
+        placed_f    = placed.float()         # (batch_size, Nsimps)
+        incompat    = (~compat).float()      # (Nsimps, Nsimps)
+        N_conflicts = placed_f @ incompat    # (batch_size, Nsimps): #conflicts
+        return N_conflicts < 0.5 # (0.5 for floating point tolerances)
+    # large-N fallback: avoid the N^2 float incompat allocation by streaming
+    # over column chunks. Algebraic identity placed @ (~compat) =
+    # |placed| - placed @ compat lets us drop the ~compat step.
+    placed_f = placed.float()
+    n_placed = placed_f.sum(dim=1, keepdim=True)
+    chunk_N  = max(1, 2_000_000_000 // (4 * N))
+    legal    = torch.empty(B, N, dtype=torch.bool, device=placed.device)
+    for c0 in range(0, N, chunk_N):
+        c1 = min(c0 + chunk_N, N)
+        N_compat = placed_f @ compat[:, c0:c1].float()
+        legal[:, c0:c1] = (n_placed - N_compat) < 0.5
+    return legal
 
 # AR rollout
 # ==========

@@ -18,7 +18,7 @@
 # -----------------------------------------------------------------------------
 # Description:  Interactive GUI for AR rollout.
 #                 left  panel: polygon with placed simps as filled triangles.
-#                 right panel: dual graph (spring layout), nodes colored by the
+#                 right panel: dual graph (random layout), nodes colored by the
 #                              model's next-simp probability.
 #               Click a legal node on the right to place that simp. The
 #               bottom strip has |x|<= / |y|<= bounds and a [Random] button to
@@ -33,6 +33,8 @@
 from __future__ import annotations
 
 import argparse
+import re
+import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -148,7 +150,7 @@ class Visualizer:
     Interactive 2-panel AR-rollout viewer with a random-polygon button.
 
     Left panel : polygon, placed simps as filled triangles.
-    Right panel: dual graph, spring layout, nodes colored by the model's
+    Right panel: dual graph, random layout, nodes colored by the model's
                  next-simp probability over legal candidates.
     Bottom     : `|x| <=`, `|y| <=` text boxes and a `[Random]` button.
 
@@ -171,24 +173,37 @@ class Visualizer:
         self.fig, (self.ax_poly, self.ax_dual) = plt.subplots(
             1, 2, figsize=(13, 7.0),
         )
-        self.fig.subplots_adjust(bottom=0.18)
+        self.fig.subplots_adjust(bottom=0.18, top=0.97)
 
         # bottom strip widgets
-        ax_xmax = self.fig.add_axes([0.13, 0.04, 0.05, 0.05])
-        ax_ymax = self.fig.add_axes([0.27, 0.04, 0.05, 0.05])
-        ax_beta = self.fig.add_axes([0.40, 0.04, 0.05, 0.05])
-        ax_btn  = self.fig.add_axes([0.52, 0.04, 0.10, 0.05])
+        ax_xmax  = self.fig.add_axes([0.13, 0.04, 0.05, 0.05])
+        ax_ymax  = self.fig.add_axes([0.27, 0.04, 0.05, 0.05])
+        ax_btn   = self.fig.add_axes([0.13, 0.105, 0.19, 0.04])
+        ax_beta  = self.fig.add_axes([0.40, 0.04, 0.05, 0.05])
+        ax_turbo = self.fig.add_axes([0.52, 0.04, 0.10, 0.05])
 
-        # default bounds = 4, but grow to fit the initial polygon
-        init_xmax = max(4, int(initial_pts[:, 0].max()))
-        init_ymax = max(4, int(initial_pts[:, 1].max()))
+        # default bounds = 6, but grow to fit the initial polygon
+        init_xmax = max(6, int(initial_pts[:, 0].max()))
+        init_ymax = max(6, int(initial_pts[:, 1].max()))
         self.tb_xmax = TextBox(ax_xmax, "0 <= x_i <= ", initial=str(init_xmax))
         self.tb_ymax = TextBox(ax_ymax, "0 <= y_i <= ", initial=str(init_ymax))
         self.tb_beta = TextBox(ax_beta, "beta = ",   initial="1.0")
         self.tb_beta.on_submit(self._on_beta_change)
-        self.btn_rand = Button(ax_btn, "Random")
+        # numeric-only filters: int for xmax/ymax, float for beta. Reject any
+        # other keystroke by reverting to the last valid value.
+        self._suppress_validation = False
+        self._last_valid_xmax = str(init_xmax)
+        self._last_valid_ymax = str(init_ymax)
+        self._last_valid_beta = "1.0"
+        self.tb_xmax.on_text_change(self._validate_int_xmax)
+        self.tb_ymax.on_text_change(self._validate_int_ymax)
+        self.tb_beta.on_text_change(self._validate_float_beta)
+        self.btn_rand = Button(ax_btn, "random")
         self.btn_rand.on_clicked(self._on_random)
-        self.beta = 1.0
+        self.btn_turbo = Button(ax_turbo, "turbo: OFF")
+        self.btn_turbo.on_clicked(self._on_turbo)
+        self.beta  = 1.0
+        self.turbo = False
 
         # colorbar: log scale so small probabilities are visible
         self._norm = LogNorm(vmin=1e-3, vmax=1.0)
@@ -204,10 +219,16 @@ class Visualizer:
         self.fig.canvas.mpl_connect("button_release_event", self._on_release)
         self.fig.canvas.mpl_connect("key_press_event",      self._on_key)
         self.fig.canvas.mpl_connect("key_release_event",    self._on_key_release)
-        self.fig.suptitle(
-            "click a legal node to place that simp; drag to move a node     "
-            "[r] reset   [n] sample-step   [q] quit",
-            fontsize=10,
+        self.fig.text(
+            0.66, 0.17,
+            "click: place/unplace simp\n"
+            "drag:  move node\n"
+            "[n]:   step  (turbo: hold)\n"
+            "[r]:   reset\n"
+            "[d]:   debug timings\n"
+            "[q]:   quit",
+            family="monospace", fontsize=10,
+            verticalalignment="top",
         )
 
         # placeholders, set in _load_polygon
@@ -219,10 +240,19 @@ class Visualizer:
         self._drag_idx     = None   # node being grabbed (None = no drag)
         self._drag_started = False  # True once we've moved past threshold
 
-        # held-step state: tick our own timer while n/space is held so we
-        # bypass the OS auto-repeat delay
-        self._step_held  = False
-        self._step_timer = None
+        # held-step state: our timer drives the step cadence while n/space is
+        # held. _release_timer delays the take-effect of a release by 150 ms
+        # so X11 auto-repeat's fake release/press pairs don't break cadence.
+        self._step_held     = False
+        self._step_timer    = None
+        self._release_timer = None
+
+        # debug mode: collects per-step phase timings, emits a summary table
+        # on key release. Toggled by [d].
+        self._debug:         bool = False
+        self._step_log:      list[dict] = []
+        self._last_step_end: float | None = None
+        self._refresh_phase: dict[str, float] = {}
 
         self._load_polygon(initial_pts)
 
@@ -238,13 +268,13 @@ class Visualizer:
         n = len(pts)
         if n > self._BLOCK_NPTS:
             print(f"[visualize] REFUSING: Npts={n} > {self._BLOCK_NPTS}; "
-                  "spring layout, simp_compat allocation, and model eval "
-                  "would be impractical at this scale. Pick smaller bounds.",
+                  "DualGraph construction and model eval would be impractical "
+                  "at this scale. Pick smaller bounds.",
                   flush=True)
             return False
         if n > self._WARN_NPTS:
             print(f"[visualize] warning: Npts={n} > {self._WARN_NPTS}; "
-                  "spring layout and model eval may take a few seconds.",
+                  "DualGraph construction and model eval may take a few seconds.",
                   flush=True)
         return True
 
@@ -302,14 +332,12 @@ class Visualizer:
                                  length=0)
         self.ax_poly.grid(True, color="gray", alpha=0.3, linewidth=0.5)
         self.ax_poly.set_axisbelow(True)
-        self.ax_poly.set_title("polygon (placed simps)")
 
         # dual panel: fixed window because graph_layout normalizes to ~[-1,1]
         self.ax_dual.set_xlim(-1.1, 1.1)
         self.ax_dual.set_ylim(-1.1, 1.1)
         self.ax_dual.set_aspect("equal")
         self.ax_dual.set_xticks([]); self.ax_dual.set_yticks([])
-        self.ax_dual.set_title("dual graph (click to place)")
 
     def _draw_static(self):
         """
@@ -357,37 +385,50 @@ class Visualizer:
 
     # redraw
     # ------
-    def _refresh(self):
-        for a in self._artists_placed:
-            a.remove()
-        self._artists_placed = []
-        if self._artists_nodes is not None:
-            self._artists_nodes.remove()
-
-        # left: placed simps as filled triangles
+    def _refresh(self, *, incremental_add=None):
+        t = time.perf_counter()
         pts = self.dualgraph.pts
-        for i in np.where(self.placed)[0]:
-            tri = pts[self.dualgraph.simps[i]]
+        if incremental_add is not None:
+            # rapid path: append only the new patch
+            tri = pts[self.dualgraph.simps[incremental_add]]
             patch = MplPolygon(
                 tri, closed=True, facecolor="#4c72b0", edgecolor="black",
                 alpha=0.65, linewidth=0.8, zorder=2,
             )
             self.ax_poly.add_patch(patch)
             self._artists_placed.append(patch)
+        else:
+            for a in self._artists_placed:
+                a.remove()
+            self._artists_placed = []
+            for i in np.where(self.placed)[0]:
+                tri = pts[self.dualgraph.simps[i]]
+                patch = MplPolygon(
+                    tri, closed=True, facecolor="#4c72b0", edgecolor="black",
+                    alpha=0.65, linewidth=0.8, zorder=2,
+                )
+                self.ax_poly.add_patch(patch)
+                self._artists_placed.append(patch)
+        if self._artists_nodes is not None:
+            self._artists_nodes.remove()
+        self._refresh_phase["patches"] = time.perf_counter() - t
 
         # right: nodes colored by status + prob (log-scaled so small
         # probabilities are visible; absolute, so all legal probs sum to 1)
+        t = time.perf_counter()
         probs, legal = self._model_probs()
+        self._refresh_phase["forward2"] = time.perf_counter() - t
 
+        t = time.perf_counter()
         colors = np.empty((self.N, 4))
-        for i in range(self.N):
-            if self.placed[i]:
-                colors[i] = (0.15, 0.15, 0.15, 1.0)
-            elif not legal[i]:
-                colors[i] = (0.88, 0.88, 0.88, 0.35)   # faded
-            else:
-                # clamp to vmin so tiny probs render at the bottom of cmap
-                colors[i] = plt.cm.viridis(self._norm(max(probs[i], 1e-3)))
+        colors[:] = [0.88, 0.88, 0.88, 0.35]                  # faded default
+        legal_active = legal & ~self.placed
+        if legal_active.any():
+            # clamp to vmin so tiny probs render at the bottom of cmap
+            colors[legal_active] = plt.cm.viridis(
+                self._norm(np.maximum(probs[legal_active], 1e-3))
+            )
+        colors[self.placed] = [0.15, 0.15, 0.15, 1.0]
         sizes      = np.where(self.placed | legal, 80, 12)
         linewidths = np.where(self.placed | legal, 0.6, 0.0)
         self._artists_nodes = self.ax_dual.scatter(
@@ -403,7 +444,11 @@ class Visualizer:
         self.ax_poly.set_xlabel(
             f"placed: {n_placed}/{target}   legal next: {n_legal}",
         )
+        self._refresh_phase["scatter"] = time.perf_counter() - t
+
+        t = time.perf_counter()
         self.fig.canvas.draw_idle()
+        self._refresh_phase["draw_idle"] = time.perf_counter() - t
 
     # events
     # ------
@@ -413,6 +458,14 @@ class Visualizer:
     _DRAG_TRIGGER = 0.04    # min motion (data coords) to start dragging
 
     def _on_press(self, event):
+        # double-click on an entry field clears it (typing replaces)
+        if event.dblclick:
+            for tb in (self.tb_xmax, self.tb_ymax, self.tb_beta):
+                if event.inaxes is tb.ax:
+                    self._suppress_validation = True
+                    tb.set_val("")
+                    self._suppress_validation = False
+                    return
         # polygon panel: hull-vertex toggle
         if event.inaxes is self.ax_poly:
             if event.xdata is None or event.ydata is None:
@@ -557,18 +610,28 @@ class Visualizer:
             print("[reset]", flush=True)
             self._refresh()
         elif event.key in ("n", " "):
+            # cancel a pending release: this press confirms the key is held
+            if self._release_timer is not None:
+                self._release_timer.stop()
+                self._release_timer = None
             if self._step_held:
                 return                    # ignore OS auto-repeat
             self._step_held = True
             self._do_step()
-            self._step_timer = self.fig.canvas.new_timer(interval=60)
-            self._step_timer.add_callback(self._do_step)
-            self._step_timer.start()
+            if self.turbo:
+                self._step_timer = self.fig.canvas.new_timer(interval=60)
+                self._step_timer.add_callback(self._do_step)
+                self._step_timer.start()
+        elif event.key == "d":
+            self._debug = not self._debug
+            print(f"[debug] {'ON' if self._debug else 'OFF'}", flush=True)
         elif event.key == "q":
             plt.close(self.fig)
 
     def _do_step(self):
+        t0 = time.perf_counter()
         probs, legal = self._model_probs()
+        t1 = time.perf_counter()
         if not legal.any():
             print("[step] no legal simps (triangulation complete)",
                   flush=True)
@@ -583,14 +646,80 @@ class Visualizer:
               f"({int(self.placed.sum())}/{self.dualgraph.N_simps_per_ft})",
               flush=True)
         self._announce_regularity()
-        self._refresh()
+        t2 = time.perf_counter()
+        self._refresh_phase = {}
+        self._refresh(incremental_add=i)
+        t3 = time.perf_counter()
+        if self._debug:
+            rec = {
+                "forward1": (t1 - t0) * 1000,
+                "between":  (t2 - t1) * 1000,
+                "refresh":  (t3 - t2) * 1000,
+                "total":    (t3 - t0) * 1000,
+                "placed":   int(self.placed.sum()),
+                **{k: v * 1000 for k, v in self._refresh_phase.items()},
+            }
+            if self._last_step_end is not None:
+                rec["gap"] = (t0 - self._last_step_end) * 1000
+            self._last_step_end = t3
+            self._step_log.append(rec)
 
     def _on_key_release(self, event):
         if event.key in ("n", " "):
-            self._step_held = False
-            if self._step_timer is not None:
-                self._step_timer.stop()
-                self._step_timer = None
+            # may be a fake release injected by X11 auto-repeat; confirm
+            # after 150 ms. _on_key cancels this timer if a press lands first.
+            if self._release_timer is not None:
+                self._release_timer.stop()
+            self._release_timer = self.fig.canvas.new_timer(interval=150)
+            self._release_timer.single_shot = True
+            self._release_timer.add_callback(self._finalize_release)
+            self._release_timer.start()
+
+    def _finalize_release(self):
+        self._release_timer = None
+        self._step_held = False
+        if self._step_timer is not None:
+            self._step_timer.stop()
+            self._step_timer = None
+        if self._debug:
+            self._dump_step_log()
+        else:
+            self._step_log.clear()
+            self._last_step_end = None
+
+    def _dump_step_log(self):
+        if not self._step_log:
+            return
+        n = len(self._step_log)
+        rows = [
+            ("forward1",  "model forward (sample next simp)"),
+            ("between",   "selection + regularity check"),
+            ("refresh",   "refresh subtotal"),
+            ("patches",   "  artist update (1 patch)"),
+            ("forward2",  "  model forward (recolor)"),
+            ("scatter",   "  scatter colors + recreate"),
+            ("draw_idle", "  draw_idle queue (paint is async)"),
+            ("total",     "TOTAL work per step"),
+            ("gap",       "idle gap before next step"),
+        ]
+        first = self._step_log[0].get("placed", "?")
+        last  = self._step_log[-1].get("placed", "?")
+        print(f"\n[debug] {n} steps this hold (simps {first} -> {last}, "
+              f"times in ms)")
+        print(f"  {'phase':36s} {'mean':>7s} {'p50':>7s} "
+              f"{'p90':>7s} {'max':>7s}")
+        print(f"  {'-' * 36} {'-' * 7} {'-' * 7} {'-' * 7} {'-' * 7}")
+        for key, label in rows:
+            vals = sorted(r[key] for r in self._step_log if key in r)
+            if not vals:
+                continue
+            mean = sum(vals) / len(vals)
+            p50  = vals[len(vals) // 2]
+            p90  = vals[min(len(vals) - 1, int(len(vals) * 0.9))]
+            print(f"  {label:36s} {mean:>7.1f} {p50:>7.1f} "
+                  f"{p90:>7.1f} {vals[-1]:>7.1f}")
+        self._step_log.clear()
+        self._last_step_end = None
 
     def _on_beta_change(self, text):
         try:
@@ -600,6 +729,41 @@ class Visualizer:
             return
         print(f"[beta] set to {self.beta}", flush=True)
         self._refresh()
+
+    _INT_RE   = re.compile(r"^\d*$")
+    _FLOAT_RE = re.compile(r"^-?\d*\.?\d*$")
+
+    def _validate_int_xmax(self, text):
+        if self._suppress_validation: return
+        if self._INT_RE.match(text):
+            self._last_valid_xmax = text
+        else:
+            self._suppress_validation = True
+            self.tb_xmax.set_val(self._last_valid_xmax)
+            self._suppress_validation = False
+
+    def _validate_int_ymax(self, text):
+        if self._suppress_validation: return
+        if self._INT_RE.match(text):
+            self._last_valid_ymax = text
+        else:
+            self._suppress_validation = True
+            self.tb_ymax.set_val(self._last_valid_ymax)
+            self._suppress_validation = False
+
+    def _validate_float_beta(self, text):
+        if self._suppress_validation: return
+        if self._FLOAT_RE.match(text):
+            self._last_valid_beta = text
+        else:
+            self._suppress_validation = True
+            self.tb_beta.set_val(self._last_valid_beta)
+            self._suppress_validation = False
+
+    def _on_turbo(self, event):
+        self.turbo = not self.turbo
+        self.btn_turbo.label.set_text("turbo: ON" if self.turbo else "turbo: OFF")
+        self.fig.canvas.draw_idle()
 
     def _on_random(self, event):
         try:

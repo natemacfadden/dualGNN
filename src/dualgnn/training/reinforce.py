@@ -152,6 +152,8 @@ def reinforce(
         "ckpt_every":     ckpt_every,
         "device":         device,
         "seed":           seed,
+        "d_model":        net.D,
+        "k_rounds":       net.K,
     }
     (run_path / "hparams.json").write_text(json.dumps(hparams_log, indent=2))
     writer = SummaryWriter(log_dir=str(run_path))
@@ -209,7 +211,7 @@ def reinforce(
             ckpt_path = run_path / f"ckpt_{step:07d}.pt"
             save_ckpt(ckpt_path,
                       net=net, optim=optim,
-                      step=step, hparams=ckpt["hparams"])
+                      step=step, hparams=hparams_log)
             print(f"  [ckpt] {ckpt_path}", flush=True)
 
     # always save final
@@ -217,7 +219,7 @@ def reinforce(
     final_path = run_path / f"ckpt_{steps:07d}.pt"
     save_ckpt(final_path,
               net=net, optim=optim,
-              step=steps, hparams=ckpt["hparams"])
+              step=steps, hparams=hparams_log)
     print(f"  [ckpt] {final_path}", flush=True)
     print(f"\n[reinforce] done ({time.time() - t_start:.0f}s)", flush=True)
     writer.close()

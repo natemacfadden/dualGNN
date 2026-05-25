@@ -34,7 +34,7 @@ import torch
 from .hparams import POLYGONS_PARQUET, FTS_DIR
 
 # polygon
-# ======
+# =======
 def load_polygons(
     parquet: Path = POLYGONS_PARQUET, id: int | None = None,
 ) -> tuple[np.ndarray, str] | tuple[pl.DataFrame, pl.DataFrame]:

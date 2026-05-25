@@ -109,7 +109,8 @@ def write_random_polygons(
                   f"{found}/{target_total} polygons found", flush=True)
             break
 
-        # weight toward larger
+        # weight bucket pick by Npts: large polygons are both the dualGNN
+        # target regime and the hardest to land via random hull draws
         weights  = np.asarray(underfilled, dtype=float)
         weights /= weights.sum()
         target_Npts = int(rng.choice(underfilled, p=weights))

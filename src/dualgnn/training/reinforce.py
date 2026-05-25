@@ -29,7 +29,6 @@ import time
 from pathlib import Path
 
 import numpy as np
-import polars as pl
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
@@ -116,7 +115,7 @@ def reinforce(
     print(f"[reinforce] {train_df.height} train polys, "
           f"{val_df.height} val polys", flush=True)
 
-    def load_states(df: pl.DataFrame) -> list[PolyState]:
+    def load_states(df) -> list[PolyState]:
         states = (build_rl_poly_state(r, src_run, device=device)
                   for r in df.iter_rows(named=True))
         return [s for s in states if len(s.pool_keys) > 0]

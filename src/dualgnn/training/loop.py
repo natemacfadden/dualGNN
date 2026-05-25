@@ -21,16 +21,6 @@
 #               polygon / FRT / partial-subset, with k_min annealed from
 #               `n_simps - gap_start` down to 0. Periodically explores via AR
 #               sampling to add novel FRTs to the pool.
-#
-# Sections (in order):
-#   1) TrainConfig + train() entry point
-#   2) Trainer class (the main loop, eval, explore, ckpt resume/save)
-#   3) Per-polygon state: PolyState + load_poly_state
-#   4) Run-local data staging: setup_local_run_data + save_polygon
-#   5) Batch construction: make_batch
-#   6) Exploration: explore_polygon
-#   7) Schedules: lr_schedule + k_min_schedule
-#   8) Loss: cross_entropy + target_entropy
 # -----------------------------------------------------------------------------
 
 # external imports
@@ -82,9 +72,8 @@ def _default_device() -> str:
     return "cpu"
 
 
-# =============================================================================
-# 1) TrainConfig + train() entry point
-# =============================================================================
+# config + entry point
+# ====================
 @dataclass
 class TrainConfig:
     """
@@ -143,26 +132,13 @@ class TrainConfig:
 
 
 def train(cfg: TrainConfig | None = None, **kwargs):
-    """
-    Thin wrapper around `Trainer`. Either pass a fully-built `TrainConfig`
-    as `cfg`, or pass field overrides as kwargs (forwarded to a default
-    `TrainConfig` constructor).
-
-    Parameters
-    ----------
-    cfg : TrainConfig, optional
-        Full training configuration. Default `None`, in which case `kwargs`
-        is used to build one.
-    **kwargs : Any
-        Field overrides for the default `TrainConfig`. Ignored when `cfg` is
-        given.
-    """
+    """Run a `Trainer`. Pass a built `TrainConfig` as `cfg`, or field
+    overrides as `kwargs` (forwarded to a default `TrainConfig`)."""
     Trainer(cfg or TrainConfig(**kwargs)).run()
 
 
-# =============================================================================
-# 2) Trainer class
-# =============================================================================
+# Trainer
+# =======
 class Trainer:
     """
     Multi-polygon DualGNN trainer.
@@ -488,9 +464,8 @@ class Trainer:
         return step
 
 
-# =============================================================================
-# 3) Per-polygon state: load_poly_state (PolyState lives in state.py)
-# =============================================================================
+# poly state
+# ==========
 def load_poly_state(
     poly_id: int, run_polygons: Path, run_fts_dir: Path,
     *, device: str, grow2d_target: int,
@@ -564,9 +539,8 @@ def load_poly_state(
     )
 
 
-# =============================================================================
-# 4) Run-local data staging: setup_local_run_data + save_polygon
-# =============================================================================
+# run staging
+# ===========
 def setup_local_run_data(
     *, run_dir: Path, poly_ids: list[int] | None,
     src_polygons: Path = POLYGONS_PARQUET, src_fts_dir: Path = FTS_DIR,
@@ -662,9 +636,8 @@ def save_polygon(
     return new_id
 
 
-# =============================================================================
-# 5) Batch construction: make_batch
-# =============================================================================
+# batches
+# =======
 def make_batch(*, cmplx, simp_compat_t, simp_cond, rng, batch_size, device,
                k_min):
     """
@@ -721,9 +694,8 @@ def make_batch(*, cmplx, simp_compat_t, simp_cond, rng, batch_size, device,
     return placed, legal, target
 
 
-# =============================================================================
-# 6) Exploration: explore_polygon
-# =============================================================================
+# exploration
+# ===========
 def explore_polygon(
     state: PolyState, net, *,
     n_per_round: int, beta: float, device: str,
@@ -830,34 +802,11 @@ def explore_polygon(
     return stats
 
 
-# =============================================================================
-# 7) Schedules: lr_schedule + k_min_schedule
-# =============================================================================
+# schedules
+# =========
 def lr_schedule(step, *, warmup, total, base_lr):
-    """
-    Linear warmup then cosine decay to zero.
-
-    Returns `base_lr * step / warmup` for `step < warmup`, then
-    `base_lr * 0.5 * (1 + cos(pi * (step - warmup) / (total - warmup)))`
-    until `step >= total` (where it stays at 0).
-
-    Parameters
-    ----------
-    step : int
-        Current training step.
-
-    warmup : int
-        Number of linear-warmup steps before cosine decay begins.
-    total : int
-        Total training steps. Decay reaches 0 at `step == total`.
-    base_lr : float
-        Peak learning rate (the value reached at the end of warmup).
-
-    Returns
-    -------
-    lr : float
-        Learning rate at `step`.
-    """
+    """Linear warmup over `warmup` steps to `base_lr`, then cosine decay to 0
+    by `total`."""
     if step < warmup:
         return base_lr * step / max(1, warmup)
     progress = (step - warmup) / max(1, total - warmup)
@@ -865,75 +814,23 @@ def lr_schedule(step, *, warmup, total, base_lr):
 
 
 def k_min_schedule(step, *, total, N_simps_per_ft, gap_start):
-    """
-    Linear anneal of `k_min` from `N_simps_per_ft - gap_start` at step 0 down
-    to 0 at step `total`. With `gap_start=2`: starts at 'all but 2' simps
-    pre-placed (curriculum makes the first call easy; later steps see fewer
-    pre-placed simps).
-
-    Parameters
-    ----------
-    step : int
-        Current training step.
-
-    total : int
-        Total training steps. `k_min` reaches 0 at `step == total`.
-    N_simps_per_ft : int
-        Number of simps in a full FRT for the current polygon.
-    gap_start : int
-        Gap from N_simps_per_ft to the initial `k_min`. Setting it `>=
-        N_simps_per_ft` disables the curriculum (`k_min == 0` throughout).
-
-    Returns
-    -------
-    k_min : int
-        Minimum number of pre-placed simps for batches drawn at `step`.
-    """
+    """Linear anneal of `k_min` from `N_simps_per_ft - gap_start` to 0 over
+    `total` steps. `gap_start >= N_simps_per_ft` disables the curriculum."""
     start = max(0, N_simps_per_ft - gap_start)
     return max(0, int(round(start * (1.0 - step / max(1, total)))))
 
 
-# =============================================================================
-# 8) Loss: cross_entropy + target_entropy
-# =============================================================================
+# losses
+# ======
 def cross_entropy(logits, target):
-    """
-    Soft-target cross-entropy: `-sum(target * log_softmax(logits))`, mean-
-    reduced over the batch. `nan_to_num` zeros out the `0 * (-inf)` entries
-    that arise when `target=0` on an illegal (masked-to -inf) simp.
-
-    Parameters
-    ----------
-    logits : Tensor
-        `(batch_size, Nsimps)` float. Per-simp logits from the model;
-        illegal simps are expected to be `-inf`.
-    target : Tensor
-        `(batch_size, Nsimps)` float. Empirical next-simp probability
-        distribution; rows sum to 1 (mass on illegal simps is 0).
-
-    Returns
-    -------
-    loss : Tensor
-        Scalar tensor (with grad) holding the mean cross-entropy.
-    """
+    """Soft-target cross-entropy `-sum(target * log_softmax(logits))`, mean
+    over batch. `nan_to_num` zeros the `0 * -inf` entries from illegal simps
+    (logits masked to -inf with target=0 there)."""
     log_p = F.log_softmax(logits, dim=-1)
     return -(target * log_p).nan_to_num(0).sum(dim=-1).mean()
 
 
 def target_entropy(target):
-    """
-    Shannon entropy of the empirical target distribution (per-row), mean-
-    reduced over the batch. Used to convert `cross_entropy` into KL via
-    `train/kl = loss - target_entropy`.
-
-    Parameters
-    ----------
-    target : Tensor
-        `(batch_size, Nsimps)` float. Empirical next-simp distribution.
-
-    Returns
-    -------
-    H : Tensor
-        Scalar tensor (no grad) holding the mean entropy.
-    """
+    """Per-row Shannon entropy of `target`, mean over batch. Convert
+    `cross_entropy` into KL via `train/kl = loss - target_entropy`."""
     return -torch.xlogy(target, target).sum(dim=-1).mean()

@@ -55,7 +55,7 @@ class SimpConditional:
     ):
         # (simps_to_bitmaps is separate since we use it elsewhere)
         self.bm = simps_to_bitmaps(pool_simps, dualgraph_simps)
-        self._bm_gpu: dict = {}
+        self._bm_gpu: torch.Tensor | None = None
 
     def conditional_batch(
         self,
@@ -87,17 +87,12 @@ class SimpConditional:
         return counts / tot.clamp(min=1)
 
     def _gpu_pool(self, device: str | torch.device) -> torch.Tensor:
-        """
-        Move the bitmap to the device (memoized).
-        """
-        key = str(device)
-        bm = self._bm_gpu.get(key)
-        if bm is None:
-            bm = torch.from_numpy(self.bm).to(
+        """Move the bitmap to the device on first call, then cache"""
+        if self._bm_gpu is None:
+            self._bm_gpu = torch.from_numpy(self.bm).to(
                 device=device, dtype=torch.float32,
             )
-            self._bm_gpu[key] = bm
-        return bm
+        return self._bm_gpu
 
 # bitmap encoding
 # ===============

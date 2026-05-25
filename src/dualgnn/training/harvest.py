@@ -237,21 +237,8 @@ def _classify_regularity(
     pts:   np.ndarray,
     simps: np.ndarray,
 ) -> np.ndarray:
-    """
-    Per-FT `is_regular` flag. Used to filter the grow2d output to regulars.
-
-    Parameters
-    ----------
-    pts : ndarray
-        `(Npts, 2)` int. Lattice points of the polygon.
-    simps : ndarray
-        `(Nft, N_simps_per_ft, 3)` int. Each row is one FT.
-
-    Returns
-    -------
-    flags : ndarray
-        `(Nft,)` bool. `flags[t]` True iff FT `t` is regular.
-    """
+    """Per-FT `is_regular(pts, s)` flag for `simps` shape `(Nft, _, 3)`.
+    Used to filter grow2d output to regulars."""
     if len(simps) == 0:
         return np.zeros(0, dtype=bool)
     return np.array([bool(is_regular(pts, s)) for s in simps], dtype=bool)

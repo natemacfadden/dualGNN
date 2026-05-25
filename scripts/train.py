@@ -69,6 +69,12 @@ def add_cfg_args(parser, cfg_cls):
                 flag, action=argparse.BooleanOptionalAction, **kwargs,
             )
         else:
+            if f.type not in CLI_TYPES:
+                raise TypeError(
+                    f"TrainConfig.{f.name}: type {f.type!r} has no CLI_TYPES "
+                    f"entry in scripts/train.py. Add one (or change the field "
+                    f"to a supported type)."
+                )
             parser.add_argument(
                 flag, type=CLI_TYPES[f.type], **kwargs,
             )

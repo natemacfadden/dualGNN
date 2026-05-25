@@ -23,7 +23,6 @@
 import ctypes
 import math
 import signal
-import threading
 import warnings
 
 import numba
@@ -102,26 +101,7 @@ def compute_bdry(pts: np.ndarray) -> np.ndarray:
 # -------------
 @numba.njit(cache=True)
 def signed_area2(a, b, c):
-    """
-    Twice the signed area of the triangle `(a, b, c)` in 2D.
-
-    Equivalent to `det([[ax, ay, 1], [bx, by, 1], [cx, cy, 1]])`.
-
-    Positive iff `a, b, c` is counter-clockwise; zero iff collinear; magnitude
-    is twice the absolute area (so unimodular triangles have
-    `|signed_area2| == 1`).
-
-    Parameters
-    ----------
-    a, b, c : ndarray
-        Length-2 int arrays giving the 2D lattice coordinates of the three
-        triangle points.
-
-    Returns
-    -------
-    s : int
-        Twice the signed area.
-    """
+    """Twice the signed area of triangle (a, b, c); >0 iff CCW, ±1 iff unimodular"""
     return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
 
 # lattice point enumeration
@@ -275,22 +255,8 @@ def random_lattice_polygon(
 # triangulation
 # =============
 def canonical_simps(simps: np.ndarray) -> np.ndarray:
-    """
-    Canonical form of a triangulation.
-
-    Sorts each simp's point indices, then lex-sorts the rows. Callers that
-    need a dedup key call `.tobytes()` on the result.
-
-    Parameters
-    ----------
-    simps : ndarray
-        `(N_simps_per_ft, 3)` int. The simps of one FT (as indices).
-
-    Returns
-    -------
-    canon : ndarray
-        Same shape as `simps`, with columns sorted and rows lex-sorted.
-    """
+    """Canonicalize a triangulation: sort each simp's indices, then lex-sort
+    the rows. Call `.tobytes()` on the result for a dedup key."""
     s = np.sort(simps, axis=1)
     return s[np.lexsort(s.T[::-1])]
 
@@ -331,16 +297,16 @@ def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool:
     vc   = VectorConfiguration(vecs, labels=list(range(len(pts))))
     fan  = vc.triangulate(cells=simps)
 
-    # check regularity
+    # check regularity, with a SIGALRM watchdog for regfans hangs.
+    # Note: SIGALRM only works on the main thread of the main interpreter,
+    # so calling is_regular from a worker thread will raise ValueError -- if
+    # you ever need threaded harvesting, replace this with a thread-safe
+    # watchdog (e.g. threading.Timer + _thread.interrupt_main).
     def raise_timeout(signum, frame):
         raise TimeoutError("is_regular hung")
 
-    # SIGALRM only works in the main thread of the main interpreter; in a
-    # worker thread, skip the watchdog and let regfans run unguarded.
-    have_timeout = threading.current_thread() is threading.main_thread()
-    if have_timeout:
-        old = signal.signal(signal.SIGALRM, raise_timeout)
-        signal.alarm(60)
+    old = signal.signal(signal.SIGALRM, raise_timeout)
+    signal.alarm(60)
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings("error", module="regfans")
@@ -350,9 +316,8 @@ def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool:
               f"(Npts={len(pts)}, Nsimps={len(simps)})", flush=True)
         return False
     finally:
-        if have_timeout:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old)
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
 
         # fix ppl's rounding bug
         _libc.fesetround(0)

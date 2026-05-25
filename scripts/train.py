@@ -41,19 +41,36 @@ CLI_TYPES = {
     "list[int] | None": csv_ints,
 }
 
+# Per-field --help text. Only fields with non-obvious behavior (e.g. auto-
+# derived defaults) need an entry; the rest fall back to no help string.
+HELP = {
+    "poly_ids":
+        "comma-separated polygon ids to restrict training to "
+        "(default: all polygons in --src-polygons). Affects the auto-"
+        "defaults of --explore-new-frac and --compile-model below.",
+    "explore_new_frac":
+        "probability per explore round of introducing a brand-new random "
+        "polygon (auto: 0.0 if --poly-ids is set, else 0.20).",
+    "compile_model":
+        "wrap the model with torch.compile(dynamic=True) "
+        "(auto: enabled iff --poly-ids has exactly one id, since a single "
+        "polygon means a fixed graph shape that compiles well).",
+}
+
 def add_cfg_args(parser, cfg_cls):
     """Auto-add one CLI flag per dataclass field on `cfg_cls`."""
     for f in fields(cfg_cls):
         flag = f"--{f.name.replace('_', '-')}"
+        kwargs = {"dest": f.name, "default": argparse.SUPPRESS}
+        if f.name in HELP:
+            kwargs["help"] = HELP[f.name]
         if f.type == "bool | None":
             parser.add_argument(
-                flag, action=argparse.BooleanOptionalAction,
-                dest=f.name, default=argparse.SUPPRESS,
+                flag, action=argparse.BooleanOptionalAction, **kwargs,
             )
         else:
             parser.add_argument(
-                flag, type=CLI_TYPES[f.type], dest=f.name,
-                default=argparse.SUPPRESS,
+                flag, type=CLI_TYPES[f.type], **kwargs,
             )
 
 if __name__ == "__main__":

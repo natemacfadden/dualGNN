@@ -124,7 +124,6 @@ class TrainConfig:
     explore_per_round:          int   = 100
     explore_new_frac:           float | None = None # auto: 0.0 if poly_ids
     explore_new_grow2d_target:  int   = 2000
-    explore_new_max_npts_full_enum: int   = 0       # 0 forces grow2d
 
     # split
     val_frac:       float = VAL_FRAC
@@ -400,7 +399,7 @@ class Trainer:
                     new_id, self.run_polygons, self.run_fts_dir,
                     device=self.cfg.device,
                     grow2d_target=self.cfg.explore_new_grow2d_target,
-                    max_npts_full_enum=self.cfg.explore_new_max_npts_full_enum,
+                    max_npts_full_enum=0,
                 )
                 if est is not None:
                     self.states[new_id] = est

@@ -174,7 +174,7 @@ def compute_legal(
         return N_conflicts < 0.5 # (0.5 for floating point tolerances)
 
     # use placed @ (~compat) = |placed| - placed @ compat to skip the
-    # (~compat).float() materialization; stream column chunks for big Nsimps.
+    # (~compat).float() materialization; stream column chunks for big Nsimps
     placed_f  = placed.float()
     n_placed  = placed_f.sum(dim=1, keepdim=True)
     chunk_len = max(1, 2_000_000_000 // (4 * Nsimps))

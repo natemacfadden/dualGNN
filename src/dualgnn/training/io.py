@@ -151,10 +151,12 @@ def load_fts(
 # -----------
 def save_ckpt(path: Path, *, net, step: int, optim, hparams) -> None:
     """
-    Save a training checkpoint to `path`.
-
-    Persists model + optimizer state plus torch / Python / numpy RNG state so
-    a training run can be resumed bit-for-bit.
+    Save a training checkpoint to `path`. Persists model + optimizer state
+    and torch / Python / numpy *global* RNG state. On resume that makes the
+    AR-rollout draws (`torch.multinomial`) replay bit-for-bit, but the
+    per-purpose `np.random.Generator`s on `Trainer` (polygon pick / batch /
+    eval / explore) are re-seeded from `cfg.seed` at `__init__` and do NOT
+    replay their post-ckpt stream.
     """
     torch.save({
         "state_dict":       net.state_dict(),

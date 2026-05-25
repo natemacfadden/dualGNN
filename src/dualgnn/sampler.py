@@ -44,6 +44,7 @@ def sample(
     beta:       float = 1.0,
     seed:       int | None = None,
     verbose:    bool = True,
+    compile:    bool = False,
 ) -> np.ndarray:
     """
     Generate `Ntriangs` triangulations from the dualGNN sampler.
@@ -71,6 +72,10 @@ def sample(
         Seed for the random number generator.
     verbose : bool, optional
         Print a warning when `beta != 1.0`. Default True.
+    compile : bool, optional
+        If True, wrap `net` with `torch.compile(net, dynamic=True)`. ~1.9x
+        speedup on Npts=64 polygons but pays ~10s compile on first call. For
+        repeated calls, compile once externally instead. Default False.
 
     Returns
     -------
@@ -109,6 +114,10 @@ def sample(
     N_out     = 0
 
     net.eval() # turn training mode off
+    # `dynamic=True` handles the trailing partial batch when batch_size does
+    # not divide Ntriangs; idempotent if `net` is already a compiled module.
+    if compile and not hasattr(net, "_orig_mod"):
+        net = torch.compile(net, dynamic=True)
     while N_out < Ntriangs:
         n = min(batch_size, Ntriangs - N_out)   # triangs in this batch
         with torch.no_grad():

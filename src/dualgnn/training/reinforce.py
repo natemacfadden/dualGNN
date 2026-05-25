@@ -38,7 +38,8 @@ from ..dualgraph import DualGraph
 from ..geometry  import canonical_simps, is_regular
 from ..model     import DualGNN
 from ..sampler   import ar_rollout_batch, sample
-from .io         import load_polygons, save_ckpt
+from .harvest    import bootstrap_fts
+from .io         import fts_path, load_polygons, save_ckpt
 from .state      import PolyState
 
 
@@ -249,14 +250,26 @@ def build_rl_poly_state(row, src_run, *, device="cpu") -> PolyState:
     # read inputs
     poly_id = int(row["id"])
     pts     = np.asarray(row["pts"], dtype=np.int64)
-    fts     = pl.read_parquet(
-        str(src_run / "fts" / f"poly_{poly_id:04d}.parquet"))
+    role    = str(row["role"])
+    parquet = fts_path(poly_id, src_run / "fts")
+
+    # auto-harvest if the polygon was never visited by SFT.
+    # val polys get val_frac=1.0 to match loop.py's SFT semantics, so files
+    # produced here remain consistent with the supervised pipeline.
+    if not parquet.exists():
+        print(f"[reinforce] FRT pool missing for poly_id={poly_id} "
+              f"(role={role}, n_pts={len(pts)}); auto-harvesting "
+              f"-> {parquet}", flush=True)
+    bootstrap_kwargs = {"split_seed": poly_id}
+    if role == "val":
+        bootstrap_kwargs["val_frac"] = 1.0
+    all_simps, _ = bootstrap_fts(pts, parquet, **bootstrap_kwargs)
 
     cmplx = DualGraph(pts)
 
     pool_keys: set[bytes] = {
-        canonical_simps(np.asarray(s.to_list(), dtype=np.int8)).tobytes()
-        for s in fts["simps"]
+        canonical_simps(np.asarray(s, dtype=np.int8)).tobytes()
+        for s in all_simps
     }
 
     return PolyState(

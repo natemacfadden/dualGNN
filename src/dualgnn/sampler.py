@@ -171,22 +171,25 @@ def compute_legal(
         `(batch_size, Nsimps)` bool. `legal[b, i]` True iff `i` is unplaced AND
         pairwise-compatible with every placed simp in row `b`.
     """
-    B, N = placed.shape
-    # original path: 4 * N^2 byte float incompat fits in working memory
-    if 4 * N * N <= 2_000_000_000:
+    B, Nsimps = placed.shape
+
+    # fast path: faster for small Nsimps. Crossover ~3k; above that the
+    # chunked path below wins by skipping the (~compat).float() materialization
+    # (and is required to stay under ~2 GB once Nsimps > 22360).
+    if Nsimps <= 3000:
         placed_f    = placed.float()         # (batch_size, Nsimps)
         incompat    = (~compat).float()      # (Nsimps, Nsimps)
         N_conflicts = placed_f @ incompat    # (batch_size, Nsimps): #conflicts
         return N_conflicts < 0.5 # (0.5 for floating point tolerances)
-    # large-N fallback: avoid the N^2 float incompat allocation by streaming
-    # over column chunks. Algebraic identity placed @ (~compat) =
-    # |placed| - placed @ compat lets us drop the ~compat step.
-    placed_f = placed.float()
-    n_placed = placed_f.sum(dim=1, keepdim=True)
-    chunk_N  = max(1, 2_000_000_000 // (4 * N))
-    legal    = torch.empty(B, N, dtype=torch.bool, device=placed.device)
-    for c0 in range(0, N, chunk_N):
-        c1 = min(c0 + chunk_N, N)
+
+    # use placed @ (~compat) = |placed| - placed @ compat to skip the
+    # (~compat).float() materialization; stream column chunks for big Nsimps.
+    placed_f  = placed.float()
+    n_placed  = placed_f.sum(dim=1, keepdim=True)
+    chunk_len = max(1, 2_000_000_000 // (4 * Nsimps))
+    legal     = torch.empty(B, Nsimps, dtype=torch.bool, device=placed.device)
+    for c0 in range(0, Nsimps, chunk_len):
+        c1 = min(c0 + chunk_len, Nsimps)
         N_compat = placed_f @ compat[:, c0:c1].float()
         legal[:, c0:c1] = (n_placed - N_compat) < 0.5
     return legal

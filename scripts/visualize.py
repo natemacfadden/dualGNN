@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import re
 import time
+from collections import defaultdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -86,29 +87,137 @@ def autodetect_device() -> str:
 
 # layout
 # ======
+_LAYOUT_KINDS = ("random", "centroid", "spectral", "spring")
+
 def graph_layout(dualgraph: DualGraph,
+                 kind: str = "random",
                  rng: np.random.Generator | None = None) -> np.ndarray:
     """
-    Random uniform layout in `[-1, 1]^2`. Each node gets an independent random
-    position; no graph structure is used. Nearly instant and spreads nodes more
-    evenly than a Gaussian (no center clumping). Drag-to-move is the intended
-    way to organize.
+    Compute a 2D layout for the dual graph; output normalized to ~`[-1, 1]^2`.
 
     Parameters
     ----------
     dualgraph : DualGraph
-        Source of `Nsimps`.
+        Source graph.
+    kind : str
+        One of:
+          - "random":   uniform in `[-1, 1]^2`. Instant, no structure.
+          - "centroid": triangle centroid in polygon coords, with collision
+                        spreading (simps sharing a centroid are placed on a
+                        tiny ring around the shared point). `O(N)`.
+          - "spectral": bottom non-trivial eigenvectors of the symmetric
+                        normalized graph Laplacian, with percentile clipping
+                        to suppress spires. `O(N^3)` (dense `eigh`).
+          - "spring":   vectorized Fruchterman-Reingold, warm-started from
+                        the centroid layout. `O(iters * N^2)` in pure numpy.
     rng : np.random.Generator, optional
-        Source of randomness. Default: a fresh `default_rng()`.
+        Source of randomness for "random". Other kinds are deterministic.
 
     Returns
     -------
     layout : ndarray
-        `(Nsimps, 2)` float. Per-node 2D positions in `[-1, 1]^2`.
+        `(Nsimps, 2)` float.
     """
-    N   = dualgraph.simps.shape[0]
-    rng = rng if rng is not None else np.random.default_rng()
+    if rng is None:
+        rng = np.random.default_rng()
+    if kind == "random":
+        return _random_layout(dualgraph, rng)
+    if kind == "centroid":
+        return _centroid_layout(dualgraph)
+    if kind == "spectral":
+        return _spectral_layout(dualgraph)
+    if kind == "spring":
+        return _spring_layout(dualgraph)
+    raise ValueError(f"unknown layout kind: {kind!r}")
+
+
+def _random_layout(dualgraph: DualGraph,
+                   rng: np.random.Generator) -> np.ndarray:
+    N = dualgraph.simps.shape[0]
     return rng.uniform(-1, 1, size=(N, 2))
+
+
+def _centroid_layout(dualgraph: DualGraph) -> np.ndarray:
+    pts   = dualgraph.pts
+    simps = dualgraph.simps
+    cents = pts[simps].mean(axis=1).astype(np.float64)
+    # Two simps share a centroid iff their integer vertex sums match.
+    sums = pts[simps].sum(axis=1)
+    groups: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for i in range(len(simps)):
+        groups[(int(sums[i, 0]), int(sums[i, 1]))].append(i)
+    coords = cents.copy()
+    radius = 0.3
+    for members in groups.values():
+        n = len(members)
+        if n < 2:
+            continue
+        for j, idx in enumerate(members):
+            theta = 2.0 * np.pi * j / n
+            coords[idx, 0] += radius * np.cos(theta)
+            coords[idx, 1] += radius * np.sin(theta)
+    return _normalize_layout(coords)
+
+
+def _spectral_layout(dualgraph: DualGraph) -> np.ndarray:
+    N = dualgraph.simps.shape[0]
+    if N < 3:
+        return np.zeros((N, 2))
+    src, dst = dualgraph.edges[0], dualgraph.edges[1]
+    A = np.zeros((N, N))
+    A[src, dst] = 1.0
+    A[dst, src] = 1.0
+    deg = A.sum(axis=1)
+    deg_safe = np.where(deg > 0, deg, 1.0)
+    d_inv_sqrt = 1.0 / np.sqrt(deg_safe)
+    L = np.eye(N) - (d_inv_sqrt[:, None] * A * d_inv_sqrt[None, :])
+    _, vecs = np.linalg.eigh(L)
+    coords = vecs[:, 1:3].copy()
+    # outlier-clip each axis so a single spire doesn't dominate the window
+    for d in range(2):
+        lo, hi = np.percentile(coords[:, d], [3.0, 97.0])
+        coords[:, d] = np.clip(coords[:, d], lo, hi)
+    return _normalize_layout(coords)
+
+
+def _spring_layout(dualgraph: DualGraph, iters: int = 80) -> np.ndarray:
+    N = dualgraph.simps.shape[0]
+    if N < 2:
+        return np.zeros((N, 2))
+    pos = _centroid_layout(dualgraph).copy()
+    src, dst = dualgraph.edges[0], dualgraph.edges[1]
+    keep = src < dst
+    src, dst = src[keep], dst[keep]
+    k = 2.0 / np.sqrt(N)
+    t = 0.2
+    cooling = t / iters
+    eye = np.eye(N, dtype=bool)
+    for _ in range(iters):
+        delta = pos[:, None, :] - pos[None, :, :]      # (N, N, 2)
+        dist2 = (delta * delta).sum(axis=2)
+        dist2[eye] = 1.0                               # avoid 0/0 on diag
+        dist2 = np.maximum(dist2, 1e-3)
+        rep = (k * k / dist2)[:, :, None] * delta
+        rep[eye] = 0.0
+        force = rep.sum(axis=1)
+        d_edge = pos[src] - pos[dst]
+        d = np.sqrt((d_edge * d_edge).sum(axis=1, keepdims=True))
+        d_safe = np.maximum(d, 1e-6)
+        att = (d * d / k) * (d_edge / d_safe)
+        np.add.at(force, src, -att)
+        np.add.at(force, dst, att)
+        f = np.sqrt((force * force).sum(axis=1, keepdims=True))
+        f_safe = np.maximum(f, 1e-9)
+        pos = pos + (force / f_safe) * np.minimum(f, t)
+        t -= cooling
+    return _normalize_layout(pos)
+
+
+def _normalize_layout(coords: np.ndarray) -> np.ndarray:
+    out  = np.asarray(coords, dtype=np.float64).copy()
+    lo, hi = out.min(axis=0), out.max(axis=0)
+    span = np.maximum(hi - lo, 1e-9)
+    return (out - (hi + lo) / 2.0) * (1.8 / span.max())
 
 # polygon helpers
 # ===============
@@ -164,10 +273,12 @@ class Visualizer:
         `(Npts, 2)` int. Polygon to load first.
     """
     def __init__(self, net: DualGNN, device: str,
-                 initial_pts: np.ndarray):
-        self.net    = net
-        self.device = device
-        self.rng    = np.random.default_rng()
+                 initial_pts: np.ndarray,
+                 layout_kind: str = "centroid"):
+        self.net         = net
+        self.device      = device
+        self.rng         = np.random.default_rng()
+        self.layout_kind = layout_kind
 
         # figure + widgets
         self.fig, (self.ax_poly, self.ax_dual) = plt.subplots(
@@ -176,18 +287,19 @@ class Visualizer:
         self.fig.subplots_adjust(bottom=0.18, top=0.97)
 
         # bottom strip widgets
-        ax_xmax  = self.fig.add_axes([0.13, 0.04, 0.05, 0.05])
-        ax_ymax  = self.fig.add_axes([0.27, 0.04, 0.05, 0.05])
-        ax_btn   = self.fig.add_axes([0.13, 0.105, 0.19, 0.04])
-        ax_beta  = self.fig.add_axes([0.40, 0.04, 0.05, 0.05])
-        ax_turbo = self.fig.add_axes([0.52, 0.04, 0.10, 0.05])
+        ax_xmax   = self.fig.add_axes([0.13, 0.04, 0.05, 0.05])
+        ax_ymax   = self.fig.add_axes([0.27, 0.04, 0.05, 0.05])
+        ax_btn    = self.fig.add_axes([0.13, 0.105, 0.19, 0.04])
+        ax_layout = self.fig.add_axes([0.40, 0.105, 0.22, 0.04])
+        ax_beta   = self.fig.add_axes([0.40, 0.04, 0.05, 0.05])
+        ax_turbo  = self.fig.add_axes([0.52, 0.04, 0.10, 0.05])
 
         # default bounds = 6, but grow to fit the initial polygon
         init_xmax = max(6, int(initial_pts[:, 0].max()))
         init_ymax = max(6, int(initial_pts[:, 1].max()))
         self.tb_xmax = TextBox(ax_xmax, "0 <= x_i <= ", initial=str(init_xmax))
         self.tb_ymax = TextBox(ax_ymax, "0 <= y_i <= ", initial=str(init_ymax))
-        self.tb_beta = TextBox(ax_beta, "beta = ",   initial="1.0")
+        self.tb_beta = TextBox(ax_beta, "beta=1/T=", initial="1.0")
         self.tb_beta.on_submit(self._on_beta_change)
         # numeric-only filters: int for xmax/ymax, float for beta. Reject any
         # other keystroke by reverting to the last valid value.
@@ -200,6 +312,8 @@ class Visualizer:
         self.tb_beta.on_text_change(self._validate_float_beta)
         self.btn_rand = Button(ax_btn, "random")
         self.btn_rand.on_clicked(self._on_random)
+        self.btn_layout = Button(ax_layout, f"layout: {self.layout_kind}")
+        self.btn_layout.on_clicked(self._on_layout)
         self.btn_turbo = Button(ax_turbo, "turbo: OFF")
         self.btn_turbo.on_clicked(self._on_turbo)
         self.beta  = 1.0
@@ -243,9 +357,12 @@ class Visualizer:
         # held-step state: our timer drives the step cadence while n/space is
         # held. _release_timer delays the take-effect of a release by 150 ms
         # so X11 auto-repeat's fake release/press pairs don't break cadence.
-        self._step_held     = False
-        self._step_timer    = None
-        self._release_timer = None
+        # A press landing >_REPEAT_GAP_S after the release is treated as a
+        # real new tap, not auto-repeat, so rapid manual tapping fires.
+        self._step_held         = False
+        self._step_timer        = None
+        self._release_timer     = None
+        self._last_release_time = 0.0
 
         # debug mode: collects per-step phase timings, emits a summary table
         # on key release. Toggled by [d].
@@ -295,7 +412,12 @@ class Visualizer:
         self.ei_t  = torch.from_numpy(self.dualgraph.edges).to(self.device)
         self.cmp_t = torch.from_numpy(self.dualgraph.simp_compat).to(self.device)
 
-        self.layout = graph_layout(self.dualgraph, rng=self.rng)
+        t0 = time.perf_counter()
+        self.layout = graph_layout(
+            self.dualgraph, kind=self.layout_kind, rng=self.rng,
+        )
+        print(f"[layout] {self.layout_kind} "
+              f"({(time.perf_counter() - t0) * 1000:.1f} ms)", flush=True)
 
         # clear panels (artists from previous polygon)
         self._artists_placed = []
@@ -610,10 +732,18 @@ class Visualizer:
             print("[reset]", flush=True)
             self._refresh()
         elif event.key in ("n", " "):
-            # cancel a pending release: this press confirms the key is held
+            # A press with a release pending could be either (a) X11 auto-
+            # repeat's fake release/press pair (within a few ms) or (b) a
+            # real manual tap landing inside the 150 ms release-debounce.
+            # Discriminate by elapsed time: <_REPEAT_GAP_S = auto-repeat
+            # (keep cadence), otherwise finalize prior release so this tap
+            # is treated as a fresh step.
             if self._release_timer is not None:
                 self._release_timer.stop()
                 self._release_timer = None
+                if (time.perf_counter() - self._last_release_time
+                        > self._REPEAT_GAP_S):
+                    self._finalize_release()
             if self._step_held:
                 return                    # ignore OS auto-repeat
             self._step_held = True
@@ -664,10 +794,15 @@ class Visualizer:
             self._last_step_end = t3
             self._step_log.append(rec)
 
+    # Threshold used in _on_key to distinguish X11 auto-repeat's fake
+    # release/press pairs (~few ms) from real manual taps (~>=100 ms).
+    _REPEAT_GAP_S = 0.05
+
     def _on_key_release(self, event):
         if event.key in ("n", " "):
             # may be a fake release injected by X11 auto-repeat; confirm
             # after 150 ms. _on_key cancels this timer if a press lands first.
+            self._last_release_time = time.perf_counter()
             if self._release_timer is not None:
                 self._release_timer.stop()
             self._release_timer = self.fig.canvas.new_timer(interval=150)
@@ -765,6 +900,19 @@ class Visualizer:
         self.btn_turbo.label.set_text("turbo: ON" if self.turbo else "turbo: OFF")
         self.fig.canvas.draw_idle()
 
+    def _on_layout(self, event):
+        kinds = list(_LAYOUT_KINDS)
+        i = kinds.index(self.layout_kind)
+        self.layout_kind = kinds[(i + 1) % len(kinds)]
+        self.btn_layout.label.set_text(f"layout: {self.layout_kind}")
+        t0 = time.perf_counter()
+        self.layout = graph_layout(
+            self.dualgraph, kind=self.layout_kind, rng=self.rng,
+        )
+        print(f"[layout] {self.layout_kind} "
+              f"({(time.perf_counter() - t0) * 1000:.1f} ms)", flush=True)
+        self._update_positions()
+
     def _on_random(self, event):
         try:
             xmax = int(self.tb_xmax.text)
@@ -795,10 +943,14 @@ def main():
                         "'0,0;4,0;0,6') or the full lattice point list. "
                         "If omitted, a random polygon in [0, 4] x [0, 4] is "
                         "drawn.")
-    p.add_argument("--ckpt", type=Path, required=True,
-                   help="trained DualGNN checkpoint")
+    p.add_argument("--ckpt", type=Path, default=Path("ckpts/reinforce.pt"),
+                   help="trained DualGNN checkpoint "
+                        "(default: ckpts/reinforce.pt)")
     p.add_argument("--device", type=str, default=None,
                    help="cuda|mps|cpu; autodetected if omitted")
+    p.add_argument("--layout", type=str, default="centroid",
+                   choices=list(_LAYOUT_KINDS),
+                   help="initial dual-graph layout (cycle via UI button)")
     args = p.parse_args()
 
     device = args.device or autodetect_device()
@@ -822,7 +974,7 @@ def main():
             )
     net = DualGNN.from_ckpt(args.ckpt, device)
     print(f"[visualize] device={device}", flush=True)
-    viz = Visualizer(net, device, pts)   # noqa: F841
+    viz = Visualizer(net, device, pts, layout_kind=args.layout)   # noqa: F841
     plt.show()
 
 

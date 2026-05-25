@@ -139,6 +139,8 @@ def write_random_polygons(
         "role":  pl.String,
         "pts":   pl.List(pl.List(pl.Int32)),
     })
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
     df.write_parquet(out)
 
     n_val = int((df["role"] == "val").sum())

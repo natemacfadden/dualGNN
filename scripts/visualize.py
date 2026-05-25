@@ -19,7 +19,7 @@
 # Description:  Interactive AR-rollout viewer.
 #                 left  panel: polygon, placed simps as filled triangles
 #                 right panel: dual graph, nodes colored by model probability
-#               Initial polygon is a random draw in [0, 4]^2; bottom strip has
+#               Initial polygon is a random draw in [0, 8]^2; bottom strip has
 #               |x|<= / |y|<= bounds + [Random]. Click in the polygon panel
 #               to add/remove a hull vertex.
 #
@@ -46,7 +46,7 @@ from scipy.spatial import ConvexHull
 
 # local imports
 from dualgnn.dualgraph import DualGraph
-from dualgnn.geometry  import enum_lattice_pts, is_regular
+from dualgnn.geometry  import enum_lattice_pts
 from dualgnn.model     import DualGNN
 from dualgnn.sampler   import compute_legal
 
@@ -76,10 +76,9 @@ def graph_layout(dualgraph: DualGraph,
       - "spring":   vectorized Fruchterman-Reingold, warm-started from
                     centroid; O(iters * N^2) in pure numpy
     `rng` only matters for "random"."""
-    if rng is None:
-        rng = np.random.default_rng()
     if kind == "random":
-        return _random_layout(dualgraph, rng)
+        rng = rng or np.random.default_rng()
+        return rng.uniform(-1, 1, size=(dualgraph.simps.shape[0], 2))
     if kind == "centroid":
         return _centroid_layout(dualgraph)
     if kind == "spectral":
@@ -87,12 +86,6 @@ def graph_layout(dualgraph: DualGraph,
     if kind == "spring":
         return _spring_layout(dualgraph)
     raise ValueError(f"unknown layout kind: {kind!r}")
-
-
-def _random_layout(dualgraph: DualGraph,
-                   rng: np.random.Generator) -> np.ndarray:
-    N = dualgraph.simps.shape[0]
-    return rng.uniform(-1, 1, size=(N, 2))
 
 
 def _centroid_layout(dualgraph: DualGraph) -> np.ndarray:
@@ -236,8 +229,8 @@ class Visualizer:
         ax_turbo  = self.fig.add_axes([0.52, 0.04, 0.10, 0.05])
 
         # default bounds = 6, but grow to fit the initial polygon
-        init_xmax = max(6, int(initial_pts[:, 0].max()))
-        init_ymax = max(6, int(initial_pts[:, 1].max()))
+        init_xmax = max(8, int(initial_pts[:, 0].max()))
+        init_ymax = max(8, int(initial_pts[:, 1].max()))
         self.tb_xmax = TextBox(ax_xmax, "0 <= x_i <= ", initial=str(init_xmax))
         self.tb_ymax = TextBox(ax_ymax, "0 <= y_i <= ", initial=str(init_ymax))
         self.tb_beta = TextBox(ax_beta, "beta=1/T=", initial="1.0")
@@ -283,37 +276,24 @@ class Visualizer:
             "drag:  move node\n"
             "[n]:   step  (turbo: hold)\n"
             "[r]:   reset\n"
-            "[d]:   debug timings\n"
             "[q]:   quit",
             family="monospace", fontsize=10,
             verticalalignment="top",
         )
 
-        # placeholders, set in _load_polygon
+        # set on first _load_polygon
         self._artists_placed = []
         self._artists_nodes  = None
         self._dual_edge_lc   = None
 
-        # drag state
         self._drag_idx     = None   # node being grabbed (None = no drag)
         self._drag_started = False  # True once we've moved past threshold
 
-        # held-step state: our timer drives the step cadence while n/space is
-        # held. _release_timer delays the take-effect of a release by 150 ms
-        # so X11 auto-repeat's fake release/press pairs don't break cadence.
-        # A press landing >_REPEAT_GAP_S after the release is treated as a
-        # real new tap, not auto-repeat, so rapid manual tapping fires.
+        # held-step state (see `_on_key` for the X11 auto-repeat dance)
         self._step_held         = False
         self._step_timer        = None
         self._release_timer     = None
         self._last_release_time = 0.0
-
-        # debug mode: collects per-step phase timings, emits a summary table
-        # on key release. Toggled by [d].
-        self._debug:         bool = False
-        self._step_log:      list[dict] = []
-        self._last_step_end: float | None = None
-        self._refresh_phase: dict[str, float] = {}
 
         self._load_polygon(initial_pts)
 
@@ -449,7 +429,6 @@ class Visualizer:
         self._artists_placed.append(patch)
 
     def _refresh(self, *, incremental_add=None):
-        t = time.perf_counter()
         if incremental_add is not None:
             self._add_placed_patch(incremental_add)   # rapid path
         else:
@@ -460,15 +439,8 @@ class Visualizer:
                 self._add_placed_patch(i)
         if self._artists_nodes is not None:
             self._artists_nodes.remove()
-        self._refresh_phase["patches"] = time.perf_counter() - t
 
-        # right: nodes colored by status + prob (log-scaled so small
-        # probabilities are visible; absolute, so all legal probs sum to 1)
-        t = time.perf_counter()
         probs, legal = self._model_probs()
-        self._refresh_phase["forward2"] = time.perf_counter() - t
-
-        t = time.perf_counter()
         colors = np.empty((self.N, 4))
         colors[:] = [0.88, 0.88, 0.88, 0.35]                  # faded default
         legal_active = legal & ~self.placed
@@ -486,18 +458,13 @@ class Visualizer:
             zorder=4,
         )
 
-        # status
         n_placed = int(self.placed.sum())
         n_legal  = int(legal.sum())
         target   = self.dualgraph.N_simps_per_ft
         self.ax_poly.set_xlabel(
             f"placed: {n_placed}/{target}   legal next: {n_legal}",
         )
-        self._refresh_phase["scatter"] = time.perf_counter() - t
-
-        t = time.perf_counter()
         self.fig.canvas.draw_idle()
-        self._refresh_phase["draw_idle"] = time.perf_counter() - t
 
     # events
     # ------
@@ -602,12 +569,15 @@ class Visualizer:
             return        # finalize drag
         self._try_place(i)
 
+    def _status(self, action: str, i: int, prefix: str = "  ") -> str:
+        """`{prefix}{action} simp[i]  (n_placed/n_simps_per_ft)` log line"""
+        return (f"{prefix}{action} simp[{i}]  "
+                f"({int(self.placed.sum())}/{self.dualgraph.N_simps_per_ft})")
+
     def _try_place(self, i: int):
         if self.placed[i]:
             self.placed[i] = False
-            print(f"  removed simp[{i}]  "
-                  f"({int(self.placed.sum())}/{self.dualgraph.N_simps_per_ft})",
-                  flush=True)
+            print(self._status("removed", i), flush=True)
             self._refresh()
             return
         _, legal = self._model_probs()
@@ -615,19 +585,8 @@ class Visualizer:
             print(f"  simp[{i}] not legal", flush=True)
             return
         self.placed[i] = True
-        print(f"  placed simp[{i}]  "
-              f"({int(self.placed.sum())}/{self.dualgraph.N_simps_per_ft})",
-              flush=True)
-        self._announce_regularity()
+        print(self._status("placed", i), flush=True)
         self._refresh()
-
-    def _announce_regularity(self):
-        """Print REGULAR / IRREGULAR on a fully-placed FT; no-op otherwise"""
-        if int(self.placed.sum()) != self.dualgraph.N_simps_per_ft:
-            return
-        simps = self.dualgraph.simps[self.placed]
-        tag   = "REGULAR" if is_regular(self.dualgraph.pts, simps) else "IRREGULAR"
-        print(f"  [complete] {tag}", flush=True)
 
     def _update_positions(self):
         """Drag-time redraw: scatter offsets + edge segments only, no
@@ -668,19 +627,13 @@ class Visualizer:
                 self._step_timer = self.fig.canvas.new_timer(interval=60)
                 self._step_timer.add_callback(self._do_step)
                 self._step_timer.start()
-        elif event.key == "d":
-            self._debug = not self._debug
-            print(f"[debug] {'ON' if self._debug else 'OFF'}", flush=True)
         elif event.key == "q":
             plt.close(self.fig)
 
     def _do_step(self):
-        t0 = time.perf_counter()
         probs, legal = self._model_probs()
-        t1 = time.perf_counter()
         if not legal.any():
-            print("[step] no legal simps (triangulation complete)",
-                  flush=True)
+            print("[step] no legal simps (triangulation complete)", flush=True)
             if self._step_timer is not None:
                 self._step_timer.stop()
                 self._step_timer = None
@@ -688,27 +641,8 @@ class Visualizer:
         probs = probs * legal.astype(probs.dtype)
         i = int(self.rng.choice(self.N, p=probs / probs.sum()))
         self.placed[i] = True
-        print(f"[step] sampled simp[{i}]  "
-              f"({int(self.placed.sum())}/{self.dualgraph.N_simps_per_ft})",
-              flush=True)
-        self._announce_regularity()
-        t2 = time.perf_counter()
-        self._refresh_phase = {}
+        print(self._status("sampled", i, prefix="[step] "), flush=True)
         self._refresh(incremental_add=i)
-        t3 = time.perf_counter()
-        if self._debug:
-            rec = {
-                "forward1": (t1 - t0) * 1000,
-                "between":  (t2 - t1) * 1000,
-                "refresh":  (t3 - t2) * 1000,
-                "total":    (t3 - t0) * 1000,
-                "placed":   int(self.placed.sum()),
-                **{k: v * 1000 for k, v in self._refresh_phase.items()},
-            }
-            if self._last_step_end is not None:
-                rec["gap"] = (t0 - self._last_step_end) * 1000
-            self._last_step_end = t3
-            self._step_log.append(rec)
 
     # Threshold used in _on_key to distinguish X11 auto-repeat's fake
     # release/press pairs (~few ms) from real manual taps (~>=100 ms).
@@ -732,45 +666,6 @@ class Visualizer:
         if self._step_timer is not None:
             self._step_timer.stop()
             self._step_timer = None
-        if self._debug:
-            self._dump_step_log()
-        else:
-            self._step_log.clear()
-            self._last_step_end = None
-
-    def _dump_step_log(self):
-        if not self._step_log:
-            return
-        n = len(self._step_log)
-        rows = [
-            ("forward1",  "model forward (sample next simp)"),
-            ("between",   "selection + regularity check"),
-            ("refresh",   "refresh subtotal"),
-            ("patches",   "  artist update (1 patch)"),
-            ("forward2",  "  model forward (recolor)"),
-            ("scatter",   "  scatter colors + recreate"),
-            ("draw_idle", "  draw_idle queue (paint is async)"),
-            ("total",     "TOTAL work per step"),
-            ("gap",       "idle gap before next step"),
-        ]
-        first = self._step_log[0].get("placed", "?")
-        last  = self._step_log[-1].get("placed", "?")
-        print(f"\n[debug] {n} steps this hold (simps {first} -> {last}, "
-              f"times in ms)")
-        print(f"  {'phase':36s} {'mean':>7s} {'p50':>7s} "
-              f"{'p90':>7s} {'max':>7s}")
-        print(f"  {'-' * 36} {'-' * 7} {'-' * 7} {'-' * 7} {'-' * 7}")
-        for key, label in rows:
-            vals = sorted(r[key] for r in self._step_log if key in r)
-            if not vals:
-                continue
-            mean = sum(vals) / len(vals)
-            p50  = vals[len(vals) // 2]
-            p90  = vals[min(len(vals) - 1, int(len(vals) * 0.9))]
-            print(f"  {label:36s} {mean:>7.1f} {p50:>7.1f} "
-                  f"{p90:>7.1f} {vals[-1]:>7.1f}")
-        self._step_log.clear()
-        self._last_step_end = None
 
     def _on_beta_change(self, text):
         try:
@@ -847,7 +742,7 @@ def main():
 
     device = args.device or autodetect_device()
     rng = np.random.default_rng()
-    pts = random_polygon(4, 4, rng)
+    pts = random_polygon(8, 8, rng)
     if pts is None:
         raise SystemExit("[visualize] failed to generate a random polygon")
     net = DualGNN.from_ckpt(args.ckpt, device)

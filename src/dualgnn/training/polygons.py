@@ -23,6 +23,7 @@
 # external imports
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -53,6 +54,7 @@ def write_random_polygons(
     seed:              int   = 0,
     out:               Path  = Path("polygons.parquet"),
     verbose:           bool  = True,
+    force:             bool  = False,
 ):
     """
     Generate `polygons.parquet` with `Npolys_per_bucket` polygons per `Npts`
@@ -76,7 +78,19 @@ def write_random_polygons(
     verbose : bool, optional
         If False, suppress the QHull / degenerate-polygon warnings emitted
         when random draws are rejected. Default True.
+    force : bool, optional
+        If True, overwrite `out` if it already exists. Default False
+        (refuse and exit, to avoid silently desyncing an existing
+        polygons.parquet from any harvested `fts/poly_XXXX.parquet` files
+        that index into it).
     """
+    # refuse to clobber an existing polygons.parquet (FRT pools index into
+    # it by id; a silent overwrite can desync the on-disk dataset).
+    out = Path(out)
+    if out.exists() and not force:
+        sys.exit(f"{out} already exists; pass --force to overwrite "
+                 f"(or --out PATH to write elsewhere)")
+
     # prep
     rng          = np.random.default_rng(seed)
     buckets      = {n: [] for n in range(Npts_min, Npts_max + 1)} # for Npts
@@ -144,7 +158,6 @@ def write_random_polygons(
         "role":  pl.String,
         "pts":   pl.List(pl.List(pl.Int32)),
     })
-    out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     df.write_parquet(out)
 

@@ -51,6 +51,10 @@ if __name__ == "__main__":
                    help="print QHull / degenerate-polygon warnings emitted "
                         "when random draws are rejected (default: on; pass "
                         "--no-verbose to silence)")
+    p.add_argument("--force",         action="store_true",
+                   help="overwrite --out if it already exists "
+                        "(default: refuse, to avoid desyncing the dataset "
+                        "from any harvested fts/poly_XXXX.parquet files)")
 
     # generate random polygons
     write_random_polygons(**vars(p.parse_args()))

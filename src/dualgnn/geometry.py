@@ -41,7 +41,12 @@ _libc.fesetround(0)
 # ========
 def compute_bdry(pts: np.ndarray) -> np.ndarray:
     """
-    Primitive boundary edges of a 2D convex lattice polygon.
+    Primitive boundary edges of a 2D convex lattice polygon. Consumed by
+    `grow2d` (when called without an explicit `bdry`) to exclude polygon-
+    boundary edges from the set of growth-candidate edges: grow2d extends
+    its complex by attaching a new triangle on the other side of an
+    exterior edge, and polygon-boundary edges have no other side inside
+    the polygon.
 
     Iterates over facets `(u,v)` of the polygon, directed ccw (e.g., the
     boundary iterates over `(u,v)`, `(v,w)`, `(w,z)`, ..., `(.,u)`). For edge

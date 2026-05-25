@@ -47,7 +47,6 @@ if __name__ == "__main__":
     p.add_argument("--steps",           type=int,   default=10000)
     p.add_argument("--batch",           type=int,   default=4)
     p.add_argument("--lr",              type=float, default=3e-5)
-    p.add_argument("--beta",            type=float, default=1.0)
     p.add_argument("--invalid-reward",  type=float, default=-2.0)
     p.add_argument("--val-every",       type=int,   default=200)
     p.add_argument("--val-Ntriangs",    type=int,   default=512)

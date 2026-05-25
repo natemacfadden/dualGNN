@@ -65,7 +65,6 @@ def reinforce(
     ckpt_every:     int,
     device:         str | None,
     seed:           int,
-    beta:           float =  1.0,
     invalid_reward: float = -2.0,
 ):
     """
@@ -101,9 +100,6 @@ def reinforce(
         Target device. `None` -> cuda if available, else cpu.
     seed : int
         Seed for torch + numpy.
-    beta : float, optional
-        Inverse temperature: `softmax(beta * logits)`. Default 1.0 (uniform-
-        over-FRTs sampling). Matches the `beta` arg of `sampler.sample`.
     invalid_reward : float, optional
         Reward assigned to invalid (non-regular) draws. Default -2.0.
     """
@@ -145,7 +141,6 @@ def reinforce(
         "steps":          steps,
         "batch":          batch,
         "lr":             lr,
-        "beta":           beta,
         "invalid_reward": invalid_reward,
         "val_every":      val_every,
         "val_Ntriangs":   val_Ntriangs,
@@ -176,7 +171,6 @@ def reinforce(
         loss, mean_reward, regular_rate = _train_step(
             net, optim, state,
             batch          = batch,
-            beta           = beta,
             invalid_reward = invalid_reward,
             device         = device,
         )
@@ -289,7 +283,6 @@ def _train_step(
     state: PolyState,
     *,
     batch:          int,
-    beta:           float,
     invalid_reward: float,
     device:         str,
 ) -> tuple[float, float, float]:
@@ -307,8 +300,6 @@ def _train_step(
 
     batch : int
         Trajectories per gradient step.
-    beta : float
-        Inverse temperature for the rollout (see `ar_rollout_batch`).
     invalid_reward : float
         Reward assigned to non-regular draws.
     device : str
@@ -330,7 +321,6 @@ def _train_step(
         edge_indices    = state.edge_indices_t,
         compat          = state.simp_compat_t,
         device          = device,
-        beta            = beta,
         track_log_probs = True,
     )
 

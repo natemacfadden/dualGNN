@@ -122,7 +122,6 @@ class TrainConfig:
     # explore
     explore_every:              int   = 500         # 0 disables
     explore_per_round:          int   = 100
-    explore_beta:               float = 1.0
     explore_new_frac:           float | None = None # auto: 0.0 if poly_ids
     explore_new_grow2d_target:  int   = 2000
     explore_new_max_npts_full_enum: int   = 0       # 0 forces grow2d
@@ -416,7 +415,7 @@ class Trainer:
 
         ex_stats = explore_polygon(
             est, self.net,
-            n_per_round=self.cfg.explore_per_round, beta=self.cfg.explore_beta,
+            n_per_round=self.cfg.explore_per_round, beta=1.0,
             device=self.cfg.device, rng=self.rng_explore,
             val_frac=self.cfg.val_frac,
             run_fts_dir=self.run_fts_dir,

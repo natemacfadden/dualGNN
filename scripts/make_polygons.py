@@ -46,6 +46,11 @@ if __name__ == "__main__":
     p.add_argument("--val-poly-frac", type=float, default=VAL_POLY_FRAC)
     p.add_argument("--seed",          type=int,   default=0)
     p.add_argument("--out",           type=Path,  default=Path("polygons.parquet"))
+    p.add_argument("--verbose",       action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="print QHull / degenerate-polygon warnings emitted "
+                        "when random draws are rejected (default: on; pass "
+                        "--no-verbose to silence)")
 
     # generate random polygons
     write_random_polygons(**vars(p.parse_args()))

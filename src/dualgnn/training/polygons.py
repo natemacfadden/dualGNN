@@ -52,6 +52,7 @@ def write_random_polygons(
     val_poly_frac:     float = VAL_POLY_FRAC,
     seed:              int   = 0,
     out:               Path  = Path("polygons.parquet"),
+    verbose:           bool  = True,
 ):
     """
     Generate `polygons.parquet` with `Npolys_per_bucket` polygons per `Npts`
@@ -72,6 +73,9 @@ def write_random_polygons(
         Seed for the RNG. Default 0.
     out : Path, optional
         Output parquet path. Default `polygons.parquet` (CWD-relative).
+    verbose : bool, optional
+        If False, suppress the QHull / degenerate-polygon warnings emitted
+        when random draws are rejected. Default True.
     """
     # prep
     rng          = np.random.default_rng(seed)
@@ -100,6 +104,7 @@ def write_random_polygons(
         pts = random_lattice_polygon(
             rng, target_Npts=target_Npts,
             Npts_min=Npts_min, Npts_max=Npts_max,
+            verbose=verbose,
         )
         attempts += 1
 

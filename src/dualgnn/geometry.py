@@ -199,6 +199,7 @@ def random_lattice_polygon(
     Npts_min:    int | None = None,
     Npts_max:    int | None = None,
     max_coord:   int | None = None,
+    verbose:     bool       = True,
 ) -> np.ndarray | None:
     """
     Sample one random convex lattice polygon aimed at `target_Npts` (but we
@@ -227,6 +228,10 @@ def random_lattice_polygon(
     max_coord : int, optional
         Coord range for seed vertices: `[0, max_coord]`. Auto-derived from
         `target_Npts` if not given.
+    verbose : bool, optional
+        If False, suppress the `enum_lattice_pts` warnings emitted on
+        degenerate draws (collinear / rank-deficient / too-few lattice
+        points). Default True (warnings shown).
 
     Returns
     -------
@@ -241,7 +246,12 @@ def random_lattice_polygon(
     # get the vertices, lattice points
     Nverts = int(rng.integers(3, 7+1))
     verts = rng.integers(0, max_coord + 1, size=(Nverts, 2))
-    pts   = enum_lattice_pts(verts)
+    if verbose:
+        pts = enum_lattice_pts(verts)
+    else:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            pts = enum_lattice_pts(verts)
 
     # reject for bad cases
     if pts is None:

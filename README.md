@@ -22,8 +22,8 @@ import numpy as np
 from dualgnn       import DualGraph, sample
 from dualgnn.model import DualGNN
 
-pts = np.array([[x, y] for x in range(5) for y in range(5)], dtype=np.int64)
-net = DualGNN.from_ckpt("ckpts/reinforce.pt")          # 4x4 square
+pts = np.array([[x, y] for x in range(5) for y in range(5)], dtype=np.int64)  # [0,4]^2
+net = DualGNN.from_ckpt("ckpts/reinforce.pt")
 fts = sample(net, DualGraph(pts), Ntriangs=8)          # (8, 32, 3) int8
 ```
 
@@ -71,5 +71,4 @@ src/dualgnn/          library code (DualGraph, DualGNN, sampler, training)
 scripts/              CLI entry points (train, reinforce, harvest, make_polygons, visualize)
 ckpts/                shipped checkpoints (D32K16 SFT, D32K16 + REINFORCE)
 notebooks/            inference demo
-tests/                smoke test
 ```

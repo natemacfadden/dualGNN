@@ -1,8 +1,8 @@
 # Conda environment for dualgnn_paper.
 # Install: conda env create -f environment.yml
 #
-# Default torch is the cu128 CUDA build (includes Blackwell / sm_120).
-# For a CPU-only torch, replace the cu128 index-url below with the CPU
+# Default torch is the cu130 CUDA build (includes Blackwell / sm_120).
+# For a CPU-only torch, replace the cu130 index-url below with the CPU
 # wheel index: https://download.pytorch.org/whl/cpu
 name: dualgnn
 channels:
@@ -29,8 +29,8 @@ dependencies:
     - regfans
     - git+https://github.com/LiamMcAllisterGroup/cytools.git
     - tensorboard
-    # torch with Blackwell-supporting cu128 wheels (see top for CPU alt)
-    - --index-url https://download.pytorch.org/whl/cu128
+    # torch with Blackwell-supporting cu130 wheels (see top for CPU alt)
+    - --index-url https://download.pytorch.org/whl/cu130
     - --extra-index-url https://pypi.org/simple
     - torch>=2.7
     - -e .

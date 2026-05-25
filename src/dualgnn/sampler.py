@@ -44,7 +44,6 @@ def sample(
     beta:       float = 1.0,
     seed:       int | None = None,
     verbose:    bool = True,
-    compile:    bool = False,
 ) -> np.ndarray:
     """
     Generate `Ntriangs` triangulations from the dualGNN sampler.
@@ -72,11 +71,6 @@ def sample(
         Seed for the random number generator.
     verbose : bool, optional
         Print a warning when `beta != 1.0`. Default True.
-    compile : bool, optional
-        Wrap `net` with `torch.compile` before sampling. First call pays a
-        ~150 s trace+lower cost but each subsequent AR step is ~1.4x faster.
-        Worth it for batches of ~3+ rollouts on large polygons; not for
-        one-shot small cases. Default False.
 
     Returns
     -------
@@ -89,9 +83,6 @@ def sample(
     # ----------------
     if device is None:
         device = next(net.parameters()).device
-
-    if compile:
-        net = torch.compile(net)
 
     if verbose and beta != 1.0:
         print(f"beta = {beta}... set to 1 for uniform sampling...")

@@ -25,9 +25,11 @@
 #               generate a fresh random polygon under those bounds.
 #
 # Usage:
-#     python scripts/visualize.py \
-#         --pts "0,0;1,0;...;4,4" \
-#         --ckpt ckpts/D32K16.pt
+#     python scripts/visualize.py --ckpt ckpts/reinforce.pt
+#
+# The initial polygon is a random draw in [0, 4] x [0, 4]; use the bottom
+# strip's |x|<= / |y|<= bounds + [Random] button (or click in the polygon
+# panel to add/remove a hull vertex) to change it.
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -60,26 +62,6 @@ plt.rcParams["keymap.save"] = []
 
 # CLI + helpers
 # =============
-def parse_pts(s: str) -> np.ndarray:
-    """
-    Parse `'x0,y0;x1,y1;...'` into an (Npts, 2) int64 array.
-
-    Parameters
-    ----------
-    s : str
-        Semicolon-separated `"x,y"` pairs.
-
-    Returns
-    -------
-    pts : ndarray
-        `(Npts, 2)` int64.
-    """
-    rows = [r.strip() for r in s.split(";") if r.strip()]
-    return np.asarray(
-        [[int(c) for c in r.split(",")] for r in rows],
-        dtype=np.int64,
-    )
-
 def autodetect_device() -> str:
     if torch.cuda.is_available():           return "cuda"
     if torch.backends.mps.is_available():   return "mps"
@@ -936,45 +918,21 @@ class Visualizer:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--pts",  type=str, default=None,
-                   help="polygon points 'x,y;x,y;...'. The convex hull is "
-                        "taken and filled with every interior lattice point, "
-                        "so you can pass just hull vertices (e.g. "
-                        "'0,0;4,0;0,6') or the full lattice point list. "
-                        "If omitted, a random polygon in [0, 4] x [0, 4] is "
-                        "drawn.")
     p.add_argument("--ckpt", type=Path, default=Path("ckpts/reinforce.pt"),
                    help="trained DualGNN checkpoint "
                         "(default: ckpts/reinforce.pt)")
     p.add_argument("--device", type=str, default=None,
                    help="cuda|mps|cpu; autodetected if omitted")
-    p.add_argument("--layout", type=str, default="centroid",
-                   choices=list(_LAYOUT_KINDS),
-                   help="initial dual-graph layout (cycle via UI button)")
     args = p.parse_args()
 
     device = args.device or autodetect_device()
-    if args.pts is None:
-        rng = np.random.default_rng()
-        pts = random_polygon(4, 4, rng)
-        if pts is None:
-            raise SystemExit("[visualize] failed to generate a random polygon")
-    else:
-        raw = parse_pts(args.pts)
-        pts = enum_lattice_pts(raw)
-        if pts is None:
-            raise SystemExit(
-                f"[visualize] --pts is degenerate (collinear or <3 unique "
-                f"points): {args.pts}"
-            )
-        if len(pts) > Visualizer._BLOCK_NPTS:
-            raise SystemExit(
-                f"[visualize] initial polygon Npts={len(pts)} > "
-                f"{Visualizer._BLOCK_NPTS}; pick a smaller polygon."
-            )
+    rng = np.random.default_rng()
+    pts = random_polygon(4, 4, rng)
+    if pts is None:
+        raise SystemExit("[visualize] failed to generate a random polygon")
     net = DualGNN.from_ckpt(args.ckpt, device)
     print(f"[visualize] device={device}", flush=True)
-    viz = Visualizer(net, device, pts, layout_kind=args.layout)   # noqa: F841
+    viz = Visualizer(net, device, pts)   # noqa: F841
     plt.show()
 
 

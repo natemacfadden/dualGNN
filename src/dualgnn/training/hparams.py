@@ -16,9 +16,8 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Cross-module training hparams. Constants that more than one
-#               training-side module depends on; library-local defaults stay
-#               in their owning module.
+# Description:  Cross-module training hparams (>1 caller). Library-local
+#               defaults stay in their owning module.
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations

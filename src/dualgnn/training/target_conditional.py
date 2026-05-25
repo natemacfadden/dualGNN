@@ -16,8 +16,8 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Empirical next-simp conditional P(sigma | T_partial) built
-#               from a harvested FRT pool.
+# Description:  Empirical next-simp conditional P(sigma | T_partial) from a
+#               harvested FRT pool.
 # -----------------------------------------------------------------------------
 
 # external imports

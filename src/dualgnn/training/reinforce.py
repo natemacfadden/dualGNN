@@ -16,9 +16,8 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  REINFORCE fine-tune of a DualGNN AR sampler. Each step rolls
-#               out grad-tracked trajectories and updates with
-#               reward = -log P (valid in pool) or INVALID_REWARD (otherwise).
+# Description:  REINFORCE fine-tune of a DualGNN AR sampler. Reward is
+#               -log P for in-pool draws, INVALID_REWARD otherwise.
 # -----------------------------------------------------------------------------
 
 # external imports

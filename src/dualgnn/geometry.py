@@ -25,7 +25,6 @@ import math
 import signal
 import warnings
 
-import numba
 import numpy as np
 from regfans import VectorConfiguration
 from scipy.spatial import ConvexHull
@@ -41,11 +40,7 @@ _libc.fesetround(0)
 def compute_bdry(pts: np.ndarray) -> np.ndarray:
     """
     Primitive boundary edges of a 2D convex lattice polygon. Consumed by
-    `grow2d` (when called without an explicit `bdry`) to exclude polygon-
-    boundary edges from the set of growth-candidate edges: grow2d extends
-    its complex by attaching a new triangle on the other side of an
-    exterior edge, and polygon-boundary edges have no other side inside
-    the polygon.
+    `grow2d` (when called without an explicit `bdry`).
 
     Iterates over facets `(u,v)` of the polygon, directed ccw (e.g., the
     boundary iterates over `(u,v)`, `(v,w)`, `(w,z)`, ..., `(.,u)`). For edge
@@ -96,13 +91,6 @@ def compute_bdry(pts: np.ndarray) -> np.ndarray:
     if not out:
         return np.empty((0, 2), dtype=np.int64)
     return np.asarray(out, dtype=np.int64)
-
-# volumes/areas
-# -------------
-@numba.njit(cache=True)
-def signed_area2(a, b, c):
-    """Twice the signed area of triangle (a, b, c); >0 iff CCW, ±1 iff unimodular"""
-    return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
 
 # lattice point enumeration
 # -------------------------
@@ -156,14 +144,17 @@ def enum_lattice_pts(verts: np.ndarray) -> np.ndarray | None:
     # see (x, y) on the non-negative side)
     x_lo, y_lo = v.min(axis=0)
     x_hi, y_hi = v.max(axis=0)
+    # c = (x, y) is inside the (CCW) hull iff every directed edge (a, b)
+    # sees it on the non-negative side: twice-signed-area (b-a) x (c-a) >= 0
     N_hull = len(hull_v)
-    pts = [
-        (x, y)
-        for x in range(int(x_lo), int(x_hi) + 1)
-        for y in range(int(y_lo), int(y_hi) + 1)
-        if all(signed_area2(hull_v[i], hull_v[(i + 1) % N_hull], (x, y)) >= 0
-               for i in range(N_hull))
-    ]
+    edges  = [(hull_v[i], hull_v[(i + 1) % N_hull]) for i in range(N_hull)]
+    def inside(c):
+        return all((b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]) >= 0
+                   for a, b in edges)
+    pts = [(x, y)
+           for x in range(int(x_lo), int(x_hi) + 1)
+           for y in range(int(y_lo), int(y_hi) + 1)
+           if inside((x, y))]
 
     # return
     if len(pts) < 3:

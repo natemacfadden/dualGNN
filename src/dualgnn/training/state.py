@@ -16,8 +16,7 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Per-polygon training state shared by SFT (loop.py) and
-#               REINFORCE (reinforce.py).
+# Description:  Per-polygon training state shared by SFT and REINFORCE.
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations

@@ -16,8 +16,8 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  CLI wrapper around `dualgnn.training.train`. Flags are
-#               auto-derived from `TrainConfig` fields.
+# Description:  CLI wrapper around `dualgnn.training.train`; flags auto-
+#               derived from `TrainConfig` fields.
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations

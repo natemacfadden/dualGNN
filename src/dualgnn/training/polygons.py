@@ -16,8 +16,8 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Generates `polygons.parquet`: a random sample of 2D lattice
-#               polygons with Npts in [Npts_min, Npts_max].
+# Description:  Generate polygons.parquet: random 2D lattice polygons with
+#               Npts in [Npts_min, Npts_max].
 # -----------------------------------------------------------------------------
 
 # external imports

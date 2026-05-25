@@ -16,11 +16,9 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Multi-polygon DualGNN trainer with curriculum + exploration.
-#               Each step trains the next-simp conditional on a random
-#               polygon / FRT / partial-subset, with k_min annealed from
-#               `n_simps - gap_start` down to 0. Periodically explores via AR
-#               sampling to add novel FRTs to the pool.
+# Description:  Multi-polygon DualGNN trainer with curriculum + AR-sampling
+#               exploration. Trains the next-simp conditional on random
+#               (polygon, FRT, partial-subset) draws with k_min annealing.
 # -----------------------------------------------------------------------------
 
 # external imports

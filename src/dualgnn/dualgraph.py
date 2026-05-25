@@ -16,9 +16,9 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Dual graph of the simplicial complex relevant to dualGNN. I.e.,
-#               the minimum graph containing the dual graph of every fine
-#               triangulation.
+# Description:  DualGraph: nodes = candidate unimodular simplices, edges =
+#               compatible pairs. Any fine triangulation's dual graph is
+#               a subgraph.
 # -----------------------------------------------------------------------------
 
 # external imports
@@ -29,9 +29,6 @@ from collections import defaultdict
 import numba
 import numpy as np
 from scipy.spatial import ConvexHull
-
-# local imports
-from .geometry import signed_area2
 
 
 # main data class

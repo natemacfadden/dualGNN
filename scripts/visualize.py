@@ -16,20 +16,14 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Interactive GUI for AR rollout.
-#                 left  panel: polygon with placed simps as filled triangles.
-#                 right panel: dual graph (random layout), nodes colored by the
-#                              model's next-simp probability.
-#               Click a legal node on the right to place that simp. The
-#               bottom strip has |x|<= / |y|<= bounds and a [Random] button to
-#               generate a fresh random polygon under those bounds.
+# Description:  Interactive AR-rollout viewer.
+#                 left  panel: polygon, placed simps as filled triangles
+#                 right panel: dual graph, nodes colored by model probability
+#               Initial polygon is a random draw in [0, 4]^2; bottom strip has
+#               |x|<= / |y|<= bounds + [Random]. Click in the polygon panel
+#               to add/remove a hull vertex.
 #
-# Usage:
-#     python scripts/visualize.py --ckpt ckpts/reinforce.pt
-#
-# The initial polygon is a random draw in [0, 4] x [0, 4]; use the bottom
-# strip's |x|<= / |y|<= bounds + [Random] button (or click in the polygon
-# panel to add/remove a hull vertex) to change it.
+# Usage:    python scripts/visualize.py --ckpt ckpts/reinforce.pt
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -329,7 +323,7 @@ class Visualizer:
     _BLOCK_NPTS = 100    # refuse to load anything bigger than this
 
     def _check_size(self, pts: np.ndarray) -> bool:
-        """Warn at >`_WARN_NPTS`, refuse at >`_BLOCK_NPTS`; return False if blocked"""
+        """Warn at >`_WARN_NPTS`, refuse at >`_BLOCK_NPTS`; False if blocked"""
         n = len(pts)
         if n > self._BLOCK_NPTS:
             print(f"[visualize] REFUSING: Npts={n} > {self._BLOCK_NPTS}; "

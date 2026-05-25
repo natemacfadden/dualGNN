@@ -16,9 +16,8 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  Harvest (i.e., generate) fine triangulations (FTs) of a polygon.
-#               Small polygons enumerate exactly via CYTools; large polygons
-#               sample via grow2d.
+# Description:  Generate fine triangulations of a polygon. Small ones via
+#               CYTools full-enum, large via grow2d sampling.
 # -----------------------------------------------------------------------------
 
 # external imports

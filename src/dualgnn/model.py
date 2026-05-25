@@ -16,8 +16,7 @@
 # =============================================================================
 #
 # -----------------------------------------------------------------------------
-# Description:  dualGNN model for next-simp prediction. Output is a per-node
-#               logit.
+# Description:  dualGNN model: per-node logit for next-simp prediction.
 # -----------------------------------------------------------------------------
 
 # external imports

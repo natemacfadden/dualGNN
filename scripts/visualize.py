@@ -74,32 +74,14 @@ _LAYOUT_KINDS = ("random", "centroid", "spectral", "spring")
 def graph_layout(dualgraph: DualGraph,
                  kind: str = "random",
                  rng: np.random.Generator | None = None) -> np.ndarray:
-    """
-    Compute a 2D layout for the dual graph; output normalized to ~`[-1, 1]^2`.
-
-    Parameters
-    ----------
-    dualgraph : DualGraph
-        Source graph.
-    kind : str
-        One of:
-          - "random":   uniform in `[-1, 1]^2`. Instant, no structure.
-          - "centroid": triangle centroid in polygon coords, with collision
-                        spreading (simps sharing a centroid are placed on a
-                        tiny ring around the shared point). `O(N)`.
-          - "spectral": bottom non-trivial eigenvectors of the symmetric
-                        normalized graph Laplacian, with percentile clipping
-                        to suppress spires. `O(N^3)` (dense `eigh`).
-          - "spring":   vectorized Fruchterman-Reingold, warm-started from
-                        the centroid layout. `O(iters * N^2)` in pure numpy.
-    rng : np.random.Generator, optional
-        Source of randomness for "random". Other kinds are deterministic.
-
-    Returns
-    -------
-    layout : ndarray
-        `(Nsimps, 2)` float.
-    """
+    """2D dual-graph layout normalized to ~[-1, 1]^2. `kind` is one of:
+      - "random":   uniform in [-1, 1]^2; instant, no structure
+      - "centroid": triangle centroid in polygon coords + collision spread; O(N)
+      - "spectral": bottom non-trivial eigvecs of normalized graph Laplacian,
+                    percentile-clipped to suppress spires; O(N^3) dense eigh
+      - "spring":   vectorized Fruchterman-Reingold, warm-started from
+                    centroid; O(iters * N^2) in pure numpy
+    `rng` only matters for "random"."""
     if rng is None:
         rng = np.random.default_rng()
     if kind == "random":
@@ -206,26 +188,9 @@ def _normalize_layout(coords: np.ndarray) -> np.ndarray:
 def random_polygon(xmax: int, ymax: int,
                    rng: np.random.Generator,
                    max_tries: int = 50) -> np.ndarray | None:
-    """
-    Generate a random convex lattice polygon in `[0, xmax] x [0, ymax]`.
-
-    Picks `n in [3, 7]` random integer vertices, then convex-hull-fills.
-
-    Parameters
-    ----------
-    xmax, ymax : int
-        Coord ranges: vertices in `[0, xmax] x [0, ymax]`.
-    rng : np.random.Generator
-        Source of randomness.
-    max_tries : int, optional
-        Bail after this many failed attempts. Default 50.
-
-    Returns
-    -------
-    pts : ndarray or None
-        `(Npts, 2)` int64 lattice points, or `None` if no non-degenerate
-        polygon was produced in `max_tries` attempts.
-    """
+    """Random convex lattice polygon in [0, xmax] x [0, ymax]: pick 3-7
+    random integer vertices, convex-hull-fill. `None` if no non-degenerate
+    polygon was produced in `max_tries` attempts."""
     for _ in range(max_tries):
         n     = int(rng.integers(3, 8))
         verts = rng.integers(0, [xmax + 1, ymax + 1], size=(n, 2))
@@ -283,15 +248,18 @@ class Visualizer:
         self.tb_ymax = TextBox(ax_ymax, "0 <= y_i <= ", initial=str(init_ymax))
         self.tb_beta = TextBox(ax_beta, "beta=1/T=", initial="1.0")
         self.tb_beta.on_submit(self._on_beta_change)
-        # numeric-only filters: int for xmax/ymax, float for beta. Reject any
-        # other keystroke by reverting to the last valid value.
+        # numeric-only filters: any non-matching keystroke reverts to the
+        # last valid value
         self._suppress_validation = False
         self._last_valid_xmax = str(init_xmax)
         self._last_valid_ymax = str(init_ymax)
         self._last_valid_beta = "1.0"
-        self.tb_xmax.on_text_change(self._validate_int_xmax)
-        self.tb_ymax.on_text_change(self._validate_int_ymax)
-        self.tb_beta.on_text_change(self._validate_float_beta)
+        self.tb_xmax.on_text_change(
+            self._validator(self.tb_xmax, "_last_valid_xmax", self._INT_RE))
+        self.tb_ymax.on_text_change(
+            self._validator(self.tb_ymax, "_last_valid_ymax", self._INT_RE))
+        self.tb_beta.on_text_change(
+            self._validator(self.tb_beta, "_last_valid_beta", self._FLOAT_RE))
         self.btn_rand = Button(ax_btn, "random")
         self.btn_rand.on_clicked(self._on_random)
         self.btn_layout = Button(ax_layout, f"layout: {self.layout_kind}")
@@ -361,9 +329,7 @@ class Visualizer:
     _BLOCK_NPTS = 100    # refuse to load anything bigger than this
 
     def _check_size(self, pts: np.ndarray) -> bool:
-        """
-        Print warning / block based on `Npts`. Returns False if blocked.
-        """
+        """Warn at >`_WARN_NPTS`, refuse at >`_BLOCK_NPTS`; return False if blocked"""
         n = len(pts)
         if n > self._BLOCK_NPTS:
             print(f"[visualize] REFUSING: Npts={n} > {self._BLOCK_NPTS}; "
@@ -378,11 +344,8 @@ class Visualizer:
         return True
 
     def _load_polygon(self, pts: np.ndarray) -> None:
-        """
-        Build a fresh `DualGraph` from `pts`, recompute layout + tensors, reset
-        placed state, redraw both panels. No-op (with a message) if the polygon
-        would be too large.
-        """
+        """Rebuild DualGraph + layout + tensors, reset placed, redraw both
+        panels. No-op (with a message) if `_check_size` blocks."""
         if not self._check_size(pts):
             return
         self.dualgraph = DualGraph(pts)
@@ -415,12 +378,8 @@ class Visualizer:
     # setup
     # -----
     def _setup_axes(self):
-        """
-        Configure both panels: polygon-panel bounds from the current `|x| <=` /
-        `|y| <=` text boxes (so polygons stay to-scale across reloads), and a
-        fixed `[-1, 1]^2` window on the dual panel matching `graph_layout`'s
-        normalization. Adds an integer lattice grid to the polygon panel.
-        """
+        """Polygon panel: bounds from the |x|/|y| text boxes, lattice grid.
+        Dual panel: fixed [-1.1, 1.1]^2 window (matches graph_layout norm)."""
         try:
             xmax = max(int(self.tb_xmax.text), 1)
             ymax = max(int(self.tb_ymax.text), 1)
@@ -444,11 +403,8 @@ class Visualizer:
         self.ax_dual.set_xticks([]); self.ax_dual.set_yticks([])
 
     def _draw_static(self):
-        """
-        Draw the polygon's hull outline + lattice-point scatter (left panel)
-        and the dual-graph edge collection (right panel). Called once per
-        `_load_polygon`; the artists persist until the next polygon swap.
-        """
+        """Polygon hull + lattice scatter (left) and dual-edge LineCollection
+        (right). Drawn once per `_load_polygon`; persists until next swap."""
         pts  = self.dualgraph.pts
         hull = pts[ConvexHull(pts).vertices]
         self.ax_poly.add_patch(MplPolygon(
@@ -489,30 +445,25 @@ class Visualizer:
 
     # redraw
     # ------
+    def _add_placed_patch(self, i: int):
+        tri = self.dualgraph.pts[self.dualgraph.simps[i]]
+        patch = MplPolygon(
+            tri, closed=True, facecolor="#4c72b0", edgecolor="black",
+            alpha=0.65, linewidth=0.8, zorder=2,
+        )
+        self.ax_poly.add_patch(patch)
+        self._artists_placed.append(patch)
+
     def _refresh(self, *, incremental_add=None):
         t = time.perf_counter()
-        pts = self.dualgraph.pts
         if incremental_add is not None:
-            # rapid path: append only the new patch
-            tri = pts[self.dualgraph.simps[incremental_add]]
-            patch = MplPolygon(
-                tri, closed=True, facecolor="#4c72b0", edgecolor="black",
-                alpha=0.65, linewidth=0.8, zorder=2,
-            )
-            self.ax_poly.add_patch(patch)
-            self._artists_placed.append(patch)
+            self._add_placed_patch(incremental_add)   # rapid path
         else:
             for a in self._artists_placed:
                 a.remove()
             self._artists_placed = []
             for i in np.where(self.placed)[0]:
-                tri = pts[self.dualgraph.simps[i]]
-                patch = MplPolygon(
-                    tri, closed=True, facecolor="#4c72b0", edgecolor="black",
-                    alpha=0.65, linewidth=0.8, zorder=2,
-                )
-                self.ax_poly.add_patch(patch)
-                self._artists_placed.append(patch)
+                self._add_placed_patch(i)
         if self._artists_nodes is not None:
             self._artists_nodes.remove()
         self._refresh_phase["patches"] = time.perf_counter() - t
@@ -596,11 +547,8 @@ class Visualizer:
         self._drag_started = False
 
     def _toggle_hull_vertex(self, click_xy: np.ndarray):
-        """
-        Click in polygon panel: if `click_xy` is a current hull vertex,
-        remove it from the hull seed; if it's a lattice point not yet in the
-        polygon, add it. Interior / facet-interior points are no-ops.
-        """
+        """Add `click_xy` to the hull seed if new, remove if it's currently a
+        hull vertex; interior / facet-interior points are no-ops."""
         pts   = self.dualgraph.pts
         match = np.where(
             (pts[:, 0] == click_xy[0]) & (pts[:, 1] == click_xy[1])
@@ -680,11 +628,7 @@ class Visualizer:
         self._refresh()
 
     def _announce_regularity(self):
-        """
-        On a fully-placed FT, run a regularity check on the placed simps and
-        print `REGULAR` or `IRREGULAR` to the terminal. No-op while the
-        triangulation is still incomplete.
-        """
+        """Print REGULAR / IRREGULAR on a fully-placed FT; no-op otherwise"""
         if int(self.placed.sum()) != self.dualgraph.N_simps_per_ft:
             return
         simps = self.dualgraph.simps[self.placed]
@@ -692,12 +636,8 @@ class Visualizer:
         print(f"  [complete] {tag}", flush=True)
 
     def _update_positions(self):
-        """
-        Cheap redraw during a drag: update the node scatter's offsets and the
-        dual-edge `LineCollection` segments to the current `self.layout`,
-        without touching colors or recomputing model probs. Used by
-        `_on_motion` for live cursor following.
-        """
+        """Drag-time redraw: scatter offsets + edge segments only, no
+        recolor / no model forward."""
         self._artists_nodes.set_offsets(self.layout)
         src, dst = self.dualgraph.edges
         keep     = self._dual_edge_keep
@@ -850,32 +790,18 @@ class Visualizer:
     _INT_RE   = re.compile(r"^\d*$")
     _FLOAT_RE = re.compile(r"^-?\d*\.?\d*$")
 
-    def _validate_int_xmax(self, text):
-        if self._suppress_validation: return
-        if self._INT_RE.match(text):
-            self._last_valid_xmax = text
-        else:
-            self._suppress_validation = True
-            self.tb_xmax.set_val(self._last_valid_xmax)
-            self._suppress_validation = False
-
-    def _validate_int_ymax(self, text):
-        if self._suppress_validation: return
-        if self._INT_RE.match(text):
-            self._last_valid_ymax = text
-        else:
-            self._suppress_validation = True
-            self.tb_ymax.set_val(self._last_valid_ymax)
-            self._suppress_validation = False
-
-    def _validate_float_beta(self, text):
-        if self._suppress_validation: return
-        if self._FLOAT_RE.match(text):
-            self._last_valid_beta = text
-        else:
-            self._suppress_validation = True
-            self.tb_beta.set_val(self._last_valid_beta)
-            self._suppress_validation = False
+    def _validator(self, textbox, attr, regex):
+        """Build an on_text_change cb that accepts `regex`-matching input
+        (stored in `attr`) and reverts any other keystroke."""
+        def cb(text):
+            if self._suppress_validation: return
+            if regex.match(text):
+                setattr(self, attr, text)
+            else:
+                self._suppress_validation = True
+                textbox.set_val(getattr(self, attr))
+                self._suppress_validation = False
+        return cb
 
     def _on_turbo(self, event):
         self.turbo = not self.turbo

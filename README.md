@@ -2,7 +2,7 @@
 
 A small graph-neural-network sampler for fine regular triangulations (FRTs) of 2D lattice polygons. Trains the next-simp conditional `P(sigma | T_partial)` on a harvested FRT pool (supervised), then fine-tunes toward uniform-over-pool with REINFORCE.
 
-**Scope:** convex 2D lattice polygons only. Non-convex inputs are silently replaced by their convex hull -- if you need non-convex shapes, you'll have to build the corresponding `DualGraph` yourself.
+**Scope:** convex 2D lattice polygons only. In theory you could manually construct a graph corresponding to a non-convex polygon and it'd work, but that is very OOD.
 
 ## Install
 

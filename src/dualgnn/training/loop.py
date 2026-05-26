@@ -24,13 +24,13 @@
 # external imports
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, field
 import json
 import math
+from pathlib import Path
 import random
 import shutil
 import sys
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -46,11 +46,11 @@ from ..geometry          import (
 from ..model             import DualGNN
 from ..sampler           import sample, compute_legal
 from .harvest            import bootstrap_fts
-from .io                 import (
-    fts_path, save_fts, load_polygons, save_ckpt, load_ckpt,
-)
 from .hparams            import (
     POLYGONS_PARQUET, FTS_DIR, VAL_FRAC, VAL_POLY_FRAC,
+)
+from .io                 import (
+    fts_path, save_fts, load_polygons, save_ckpt, load_ckpt,
 )
 from .state              import PolyState
 from .target_conditional import SimpConditional

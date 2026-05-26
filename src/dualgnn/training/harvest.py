@@ -34,8 +34,8 @@ import ctypes; ctypes.CDLL(None).fesetround(0)  # FE_TONEAREST
 # local imports
 from ..          import grow2d
 from ..geometry  import canonical_simps, is_regular
-from .io         import load_fts, save_fts
 from .hparams    import VAL_FRAC
+from .io         import load_fts, save_fts
 
 # defaults
 # ========

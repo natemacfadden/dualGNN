@@ -22,8 +22,8 @@
 # external imports
 from __future__ import annotations
 
-import random
 from pathlib import Path
+import random
 
 import numpy as np
 import polars as pl

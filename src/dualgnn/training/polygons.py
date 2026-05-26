@@ -23,8 +23,8 @@
 # external imports
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+import sys
 
 import numpy as np
 import polars as pl

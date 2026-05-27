@@ -1,4 +1,5 @@
 # dualGNN
+*[Nate MacFadden](https://github.com/natemacfadden), Liam McAllister Group, Cornell*
 
 A small graph-neural-network sampler for fine regular triangulations (FRTs) of 2D lattice polygons. Trains the next-simp conditional `P(sigma | T_partial)` on a harvested FRT pool (supervised), then fine-tunes toward uniform-over-pool with REINFORCE.
 

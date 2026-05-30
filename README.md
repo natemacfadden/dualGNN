@@ -13,6 +13,7 @@ The idea is to represent a triangulation $\mathcal{T}_i$ by its [dual graph](htt
 1) having the model assign probabilities to the nodes (via message passing),
 2) sampling a node according to these probabilities, and then
 3) masking out nodes which cannot coexist with the newly chosen simplex.
+
 To give the model enough information to do this, we encode the polytope's signed circuits (see [page 17 here](https://imag.umontpellier.fr/~ramirez/LectureSL6.pdf) or [this wonderful book](https://link.springer.com/book/10.1007/978-3-642-12971-1)). We actually encode a slightly richer object --- see the paper if curious. The circuits encode the polygon's combinatorics and the regularity of the triangulations. The raw matroid characterizes the count of fine triangulations while our enhancement characterizes the regularity of these triangulations ([DRS](https://link.springer.com/book/10.1007/978-3-642-12971-1)). More so, circuits are invariant under the $\mathrm{GL}_N(\mathbb{Z})\ltimes\mathbb{Z}^N$ symmetries of the polytope, giving the model strong inductive bias. This information is specifically encoded to the edges of $G$ and is concatenated with the messages passed through said edges.
 
 This model is trained via supervised learning on a pool of fine regular triangulations. We allow bootstrapping of the pool (similar to [CYTransformer](https://arxiv.org/abs/2507.03732)) since the polygons of primary interest have too many triangulations to enumerate (otherwise, enumerating them and sampling from them would be preferable). We also fine-tune with REINFORCE.
@@ -25,6 +26,7 @@ The model
 3) is small (~92k parameters; trained in ~7.5hrs; checkpoint attached to this repo),
 4) shows good inductive bias (generalizes zero shot), and
 5) is competitive in speed compared to the other tested samplers.
+
 Most of the performance is attributed to the inductive bias. See the paper.
 
 For string theory applications, it generates uniform samples (when paired with my [NTFE algorithm](https://arxiv.org/abs/2309.10855)) up to $h^{1,1}=86$. Likely higher (we generated samples consistent with being uniform at $h^{1,1}=128$, but it's hard to gain enough confidence in uniformity here). The model runs all the way up to the max $h^{1,1}=491$, but checking uniformity here would require assessing it out of a pool of [at least](https://arxiv.org/abs/2602.16909) $10^{167}$, which our statistics definitely cannot do. Also, we'd likely need more message passing rounds ($K=16$ in attached model).

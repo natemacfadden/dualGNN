@@ -67,11 +67,28 @@ simps, status = pushing(pts, seed=0)   # random fine pushing triangulation
 
 ### GUI
 
-For fun, we include a GUI demo (it's what's shown at the top of this README). It allows you to build an arbitrary (or random) lattice polytope (left), build its graph $G$ (right), and either select nodes manually (clicking) or randomly (n-button). This is the same model trained and studied in the paper. It should run even on light hardware like (I have an M1 MacBook which it worked on).
+For fun, we include a GUI demo (it's what's shown at the top of this README): `python scripts/visualize.py`. It allows you to build an arbitrary (or random) lattice polytope (left), build its graph $G$ (right), and either select nodes manually (clicking) or randomly (n-button). This is the same model trained and studied in the paper. It should run even on light hardware like (I have an M1 MacBook which it worked on).
 
 ### String Theory
 
-See `notebooks/ntfe_demo.ipynb`.
+Pair the 2D sampler with the [NTFE algorithm](https://arxiv.org/abs/2309.10855)
+to sample fine, regular, star triangulations (FRSTs) of a reflexive 4D polytope:
+
+```python
+import numpy as np
+from cytools import Polytope
+from dualgnn.model import DualGNN
+from dualgnn.ntfe  import sample_ntfes
+
+verts = [[-1, -1, -1, -1], [-1, -1, -1,  3], [-1, -1,  3, -1], [-1,  3, -1, -1],
+         [ 1, -1, -1, -1], [ 1, -1, -1,  3], [ 1, -1,  3, -1], [ 1,  3, -1, -1]]
+poly = Polytope(np.array(verts, dtype=np.int64))                           # reflexive, h11 = 86
+net  = DualGNN.from_ckpt("ckpts/reinforce.pt")
+heights = sample_ntfes(poly, net, N=20, N_face_triangs=1_000, n_workers=4) # (20, npts) float64
+```
+
+Each row is a height vector defining an FRST; pass `as_triangs=True` to get
+CYTools `Triangulation` objects instead. See `notebooks/ntfe_demo.ipynb`.
 
 ## Train end-to-end
 

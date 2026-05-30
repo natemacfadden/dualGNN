@@ -3,6 +3,8 @@
 
 **Paper:** [Sampling Triangulations and Calabi-Yau Threefolds with Autoregressive GNNs](https://arxiv.org/abs/2605.27770) (arXiv:2605.27770)
 
+<p align="center"><img src="docs/gui_demo.gif"/></p>
+
 A small graph-neural-network sampler for fine regular triangulations (FRTs) of convex 2D lattice polygons. These [FRTs are useful in string theory](https://arxiv.org/abs/2309.10855). More generally, they are a combinatorial population to sample from with nontrivial local and global constraints. At the time of writing this, the 'dualGNN' model in this repo is the most uniform sampler tested for polygons up to $\sim10^{20}$ triangulations.
 
 ## Model

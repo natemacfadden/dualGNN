@@ -5,7 +5,7 @@
 
 <p align="center"><img src="docs/gui_demo.gif"/></p>
 
-A small graph-neural-network sampler for fine regular triangulations (FRTs) of convex 2D lattice polygons. These [FRTs are useful in string theory](https://arxiv.org/abs/2309.10855). More generally, they are a combinatorial population to sample from with nontrivial local and global constraints. At the time of writing this, the 'dualGNN' model in this repo is the most uniform sampler tested for polygons up to $\sim10^{20}$ triangulations.
+This repo contains a small graph-neural-network sampler for fine regular triangulations (FRTs) of convex 2D lattice polygons. These [FRTs are useful in string theory](https://arxiv.org/abs/2309.10855). More generally, they are a combinatorial population to sample from with nontrivial local and global constraints. At the time of writing this, the 'dualGNN' model in this repo is the most uniform sampler tested for polygons up to $\sim10^{20}$ triangulations.
 
 ## Model
 
@@ -64,6 +64,14 @@ from dualgnn import grow2d, pushing
 simps, status = grow2d(pts, seed=0)    # random fine triangulation
 simps, status = pushing(pts, seed=0)   # random fine pushing triangulation
 ```
+
+### GUI
+
+For fun, we include a GUI demo (it's what's shown at the top of this README). It allows you to build an arbitrary (or random) lattice polytope (left), build its graph $G$ (right), and either select nodes manually (clicking) or randomly (n-button). This is the same model trained and studied in the paper. It should run even on light hardware like (I have an M1 MacBook which it worked on).
+
+### String Theory
+
+See `notebooks/ntfe_demo.ipynb`.
 
 ## Train end-to-end
 

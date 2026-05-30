@@ -1,18 +1,41 @@
 # dualGNN
 *[Nate MacFadden](https://github.com/natemacfadden), Liam McAllister Group, Cornell*
 
-A small graph-neural-network sampler for fine regular triangulations (FRTs) of 2D lattice polygons. Trains the next-simp conditional `P(sigma | T_partial)` on a harvested FRT pool (supervised), then fine-tunes toward uniform-over-pool with REINFORCE.
+**Paper:** [Sampling Triangulations and Calabi-Yau Threefolds with Autoregressive GNNs](https://arxiv.org/abs/2605.27770) (arXiv:2605.27770)
 
-**Scope:** convex 2D lattice polygons only. In theory you could manually construct a graph corresponding to a non-convex polygon and it'd work, but that is very OOD.
+A small graph-neural-network sampler for fine regular triangulations (FRTs) of convex 2D lattice polygons. These [FRTs are useful in string theory](https://arxiv.org/abs/2309.10855). More generally, they are a combinatorial population to sample from with nontrivial local and global constraints. At the time of writing this, the 'dualGNN' model in this repo is the most uniform sampler tested for polygons up to $\sim10^{20}$ triangulations.
+
+## Model
+
+The idea is to represent a triangulation $\mathcal{T}_i$ by its [dual graph](https://en.wikipedia.org/wiki/Dual_graph): nodes are simplices $\sigma_a\in\mathcal{T}_i$ and edges are drawn between adjacent simplices. By combining into $G$ the graphs of all fine triangulations (if the same simplex $\sigma_a$ is in another triangulation $\mathcal{T}_j$, merge the nodes), one can view the problem as selecting an appropriate subgraph from $G$. We do so autoregressively, adding simplices $1$-by-$1$ to the subgraph through
+1) having the model assign probabilities to the nodes (via message passing),
+2) sampling a node according to these probabilities, and then
+3) masking out nodes which cannot coexist with the newly chosen simplex.
+To give the model enough information to do this, we encode the polytope's signed circuits (see [page 17 here](https://imag.umontpellier.fr/~ramirez/LectureSL6.pdf) or [this wonderful book](https://link.springer.com/book/10.1007/978-3-642-12971-1)). We actually encode a slightly richer object --- see the paper if curious. The circuits encode the polygon's combinatorics and the regularity of the triangulations. The raw matroid characterizes the count of fine triangulations while our enhancement characterizes the regularity of these triangulations ([DRS](https://link.springer.com/book/10.1007/978-3-642-12971-1)). More so, circuits are invariant under the $\mathrm{GL}_N(\mathbb{Z})\ltimes\mathbb{Z}^N$ symmetries of the polytope, giving the model strong inductive bias. This information is specifically encoded to the edges of $G$ and is concatenated with the messages passed through said edges.
+
+This model is trained via supervised learning on a pool of fine regular triangulations. We allow bootstrapping of the pool (similar to [CYTransformer](https://arxiv.org/abs/2507.03732)) since the polygons of primary interest have too many triangulations to enumerate (otherwise, enumerating them and sampling from them would be preferable). We also fine-tune with REINFORCE.
+
+## Performance
+
+The model
+1) is the most uniform sampler of FRTs tested (there are a few methods due to their application in string theory; we include some custom methods, too),
+2) is general (a single model can be trained that samples FRTs from arbitrary polygons),
+3) is small (~92k parameters; trained in ~7.5hrs; checkpoint attached to this repo),
+4) shows good inductive bias (generalizes zero shot), and
+5) is competitive in speed compared to the other tested samplers.
+Most of the performance is attributed to the inductive bias. See the paper.
+
+For string theory applications, it generates uniform samples (when paired with my [NTFE algorithm](https://arxiv.org/abs/2309.10855)) up to $h^{1,1}=86$. Likely higher (we generated samples consistent with being uniform at $h^{1,1}=128$, but it's hard to gain enough confidence in uniformity here). The model runs all the way up to the max $h^{1,1}=491$, but checking uniformity here would require assessing it out of a pool of [at least](https://arxiv.org/abs/2602.16909) $10^{167}$, which our statistics definitely cannot do. Also, we'd likely need more message passing rounds ($K=16$ in attached model).
 
 ## Install
 
+Recommended
 ```
 conda env create -f environment.yml
 conda activate dualgnn
 ```
 
-(Or `pip install -e .` if you already have a compatible torch + CYTools environment.)
+For inference only, you can instead `pip install -e .` into an existing environment; everything it needs is on PyPI. Training is conda-only because it needs CYTools, so `pip install -e .[train]` fails on purpose and points you back to the conda env above.
 
 ## Inference
 

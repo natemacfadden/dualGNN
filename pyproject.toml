@@ -16,12 +16,16 @@ dependencies = [
     "polars",
     "torch>=2.7",
     "matplotlib",
-    "cytools",
     "regfans",
 ]
 
 [project.optional-dependencies]
-train = ["tensorboard"]
+# Training additionally needs CYTools + its native libraries (ppl, normaliz,
+# python-flint), none of which are pip-installable. Use the conda environment:
+#     conda env create -f environment.yml
+# The sentinel below makes `pip install .[train]` fail loudly at resolve time
+# rather than leave someone with a half-working (CYTools-less) setup.
+train = ["dualgnn-training-is-conda-only-see-environment-yml"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

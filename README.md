@@ -41,7 +41,7 @@ conda env create -f environment.yml
 conda activate dualgnn
 ```
 
-For inference only, you can instead `pip install -e .` into an existing environment; everything it needs is on PyPI. Training is conda-only because it needs CYTools, so `pip install -e .[train]` fails on purpose and points you back to the conda env above.
+For inference only, you can instead `pip install -e .` into an existing environment; everything it needs is on PyPI. By default this pulls the standard PyTorch build, which on Linux bundles CUDA (a multi-GB download). On a CPU-only or Apple-silicon machine, install the matching wheel first (e.g. `pip install torch --index-url https://download.pytorch.org/whl/cpu`) then `pip install -e .`. Training is conda-only because it needs CYTools, so `pip install -e .[train]` fails on purpose and points you back to the conda env above.
 
 ## Inference
 

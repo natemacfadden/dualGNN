@@ -29,7 +29,6 @@ import time
 
 import numpy as np
 import torch
-from torch.utils.tensorboard import SummaryWriter
 
 # local imports
 from ..device    import default_device
@@ -151,6 +150,8 @@ def reinforce(
         "k_rounds":       net.K,
     }
     (run_path / "hparams.json").write_text(json.dumps(hparams_log, indent=2))
+    # lazy: avoids requiring tensorboard just to import dualgnn.training
+    from torch.utils.tensorboard import SummaryWriter
     writer = SummaryWriter(log_dir=str(run_path))
     print(f"[reinforce] run dir: {run_path}", flush=True)
 

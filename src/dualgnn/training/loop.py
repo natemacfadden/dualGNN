@@ -36,7 +36,6 @@ import numpy as np
 import polars as pl
 import torch
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
 
 # local imports
 from ..device            import default_device
@@ -203,6 +202,8 @@ class Trainer:
         (self.run_path / "hparams.json").write_text(
             json.dumps(self.hparams, indent=2, default=str)
         )
+        # lazy: avoids requiring tensorboard just to import dualgnn.training
+        from torch.utils.tensorboard import SummaryWriter
         self.writer = SummaryWriter(log_dir=str(self.run_path))
 
         # runtime state

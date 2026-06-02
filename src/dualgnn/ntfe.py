@@ -240,8 +240,13 @@ def _sample(
         ):
             pool      = ctx.pools[shape_key]
             simp_idxs = pool[rng.integers(pool.shape[0])]
+            # include_points_interior_to_facets=True: 2-faces that are
+            # themselves reflexive (e.g. 2x2 squares centered at origin)
+            # would otherwise drop edge-interior points, breaking the
+            # FRT label lookup
             triangs.append(face_poly.triangulate(
-                simplices = src_to_label[simp_idxs].tolist()))
+                simplices = src_to_label[simp_idxs].tolist(),
+                include_points_interior_to_facets = True))
         # cone of heights making the 2-face FRTs extend to a regular NTFE
         cone = cone_of_permissible_heights(
             triangs, npts=ctx.npts, poly=ctx.poly)

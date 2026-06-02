@@ -57,7 +57,7 @@ net = DualGNN.from_ckpt("ckpts/reinforce.pt")
 fts = sample(net, DualGraph(pts), Ntriangs=8)          # (8, 32, 3) int8
 ```
 
-See `notebooks/inference_demo.ipynb` for a runnable version with plotting.
+See `tutorials/inference_demo.ipynb` for a runnable version with plotting.
 
 For comparison, two reference samplers are bundled (CYTools-free, both
 return `(simps, status)`):
@@ -92,7 +92,7 @@ heights = sample_ntfes(poly, net, N=20, N_face_triangs=1_000, n_workers=4) # (20
 ```
 
 Each row is a height vector defining an FRST; pass `as_triangs=True` to get
-CYTools `Triangulation` objects instead. See `notebooks/ntfe_demo.ipynb`.
+CYTools `Triangulation` objects instead. See `tutorials/ntfe_demo.ipynb`.
 
 ## Train end-to-end
 
@@ -125,5 +125,5 @@ pre-harvest a specific polygon via `python scripts/harvest.py --poly-id N`.
 src/dualgnn/          library code (DualGraph, DualGNN, sampler, training)
 scripts/              CLI entry points (train, reinforce, harvest, make_polygons, visualize)
 ckpts/                shipped checkpoints (D32K16 SFT, D32K16 + REINFORCE)
-notebooks/            inference, NTFE demos
+tutorials/             inference, NTFE demos
 ```

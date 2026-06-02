@@ -44,3 +44,7 @@ fts/
 
 # Scratch / experiment data (untracked)
 data/
+
+# Generated plots / sample caches
+*.png
+*.npz

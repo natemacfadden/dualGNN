@@ -33,6 +33,40 @@ Most of the performance is attributed to the inductive bias. See the paper.
 
 For string theory applications, it generates uniform samples (when paired with my [NTFE algorithm](https://arxiv.org/abs/2309.10855)) up to $h^{1,1}=86$. Likely higher (we generated samples consistent with being uniform at $h^{1,1}=128$, but it's hard to gain enough confidence in uniformity here). The model runs all the way up to the max $h^{1,1}=491$, but checking uniformity here would require assessing it out of a pool of [at least](https://arxiv.org/abs/2602.16909) $10^{167}$, which our statistics definitely cannot do. Also, we'd likely need more message passing rounds ($K=16$ in attached model).
 
+## Results
+
+The figures below are taken **from [the paper](paper.pdf)** (included in this repo) and are
+**not directly reproducible from the code here**; the repo ships inference and a small
+uniformity demo (`uniformity/`), not the full training and evaluation pipeline. See the
+paper for methodology, hardware, and sample counts.
+
+**Zero-shot to a much larger polygon.** The model, trained on the single triangle
+$\mathrm{conv}\{(0,0),(0,4),(6,0)\}$ ($405{,}706$ FRTs) and applied zero-shot to $[0,4]^2$
+($735{,}430{,}548$ FRTs), reaches the uniform ($1/N$) floor and is faster than `flip_walk`,
+the only other sampler that reaches it; `pushing`/`grow2d`/`fast` are quicker but biased.
+
+![KL vs sample time, zero-shot on [0,4]^2](figures/fig10_zeroshot_pareto.png)
+
+**Most uniform across many polygons.** Over $200{,}000$ samples on $20$ held-out polygons
+($11 \le N_\mathrm{pts} \le 18$), dualGNN is the most uniform sampler tested at every size,
+tying `flip_walk` only at $N_\mathrm{pts}=18$ while being $\sim4\times$ faster.
+
+![multi-polygon uniformity](figures/fig13_multipoly_uniformity.png)
+
+**No sample autocorrelation.** A good sampler's draws should be as far apart as independent
+uniform draws. Plotting the flip distance between samples $k$ apart, normalized against that
+uniform baseline, dualGNN matches uniform ($0$) at every lag while `flip_walk`'s nearby
+samples are correlated (closer together) until about $k=20$.
+
+![multi-polygon autocorrelation](figures/fig14_multipoly_autocorrelation.png)
+
+**Downstream: more diverse Calabi-Yau samples.** Combined into Calabi-Yau threefolds via the
+[NTFE algorithm](https://arxiv.org/abs/2309.10855), dualGNN's samples span far wider flop
+distances than the de facto `random_triangulations_fast` ($130$ vs $46$ mean flops at
+$h^{1,1}=86$; $204$ vs $22$ at $h^{1,1}=128$), a tradeoff for its uniformity.
+
+![CY flop-distance histograms](figures/fig20_cy_flop_distance.png)
+
 ## Install
 
 Recommended

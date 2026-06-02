@@ -5,4 +5,6 @@ A lightweight, CPU-runnable check that roughly reproduces the paper's uniformity
 
 These scripts are meant to be lightweight. This means they **do not** fully recreate paper figures. Additionally, they use hardcoded FRT counts `N` (405,706 for the triangle, 735,430,548 for `[0,4]^2`) rather than enumerating them.
 
-Note `grow2d`/`pushing` are fast but biased; the speed-vs-uniformity (Pareto) comparison against the trustworthy-uniform `flip_walk` sampler is in the paper, not here, so `kl_vs_time` only shows where dualGNN sits among the bundled samplers.
+Run with at least a few thousand draws; the script defaults (`4x6tri`, `4x4sq`) are set accordingly. At the default counts the biased samplers (`grow2d`/`pushing`) separate clearly from `dualGNN`, which tracks the uniform reference. With only a few hundred draws, even the biased samplers have not concentrated enough to collide, so every sampler sits at the noise floor and looks identical.
+
+Note `grow2d`/`pushing` are fast but biased. The only other trustworthy-uniform sampler, `flip_walk`, is deliberately omitted: it is not bundled in this repo and is ~4x slower than dualGNN, so it would dominate the runtime of this lightweight demo. Consequently `kl_vs_time` only places dualGNN among the bundled (biased) samplers and cannot, on its own, establish the "most uniform" result. That dualGNN-vs-`flip_walk` comparison is in the paper and in the Results figures of the top-level README (fig. 13).

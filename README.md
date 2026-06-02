@@ -96,6 +96,8 @@ CYTools `Triangulation` objects instead. See `tutorials/ntfe_demo.ipynb`.
 
 ## Train end-to-end
 
+> **Requires the conda environment** (`environment.yml`) — these scripts import CYTools, which pip cannot provide.
+
 Three commands -- generate polygons, supervised train, REINFORCE fine-tune:
 
 ```

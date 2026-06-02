@@ -27,7 +27,18 @@ from dataclasses import fields
 from pathlib import Path
 
 # local imports
-from dualgnn.training import train, TrainConfig
+# (training pulls in CYTools which is conda only... fail with guidance)
+try:
+    from dualgnn.training import train, TrainConfig
+except ImportError as e:
+    import sys
+    sys.exit(
+        "dualGNN training requires the conda environment (CYTools + native "
+        "libs ppl/normaliz/python-flint), which pip cannot install. Set it up "
+        "with:\n    conda env create -f environment.yml\n"
+        "(pip installs are inference-only.)\n"
+        f"[original import error: {e}]"
+    )
 
 
 csv_ints = lambda s: [int(x) for x in s.split(",") if x.strip()]

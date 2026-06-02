@@ -27,6 +27,9 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
+# local imports
+from .device import default_device
+
 
 # main model class
 # ================
@@ -193,14 +196,15 @@ class DualGNN(nn.Module):
         path : str or Path
             Checkpoint file.
         device : str or torch.device, optional
-            Target device. Default `None` -> CUDA if available, else CPU.
+            Target device. Default `None` -> best available (CUDA, else MPS,
+            else CPU).
 
         Returns
         -------
         net : DualGNN
         """
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = default_device()
         ckpt = torch.load(path, map_location=device, weights_only=False)
         hp   = ckpt["hparams"]
         net  = cls(D=hp["d_model"], K=hp["k_rounds"]).to(device).eval()

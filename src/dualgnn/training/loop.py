@@ -39,6 +39,7 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 # local imports
+from ..device            import default_device
 from ..dualgraph         import DualGraph
 from ..geometry          import (
     canonical_simps, is_regular, random_lattice_polygon,
@@ -60,14 +61,6 @@ from .target_conditional import SimpConditional
 # ========================================
 NPTS_MIN = 5   # range for fresh polygon generation during explore
 NPTS_MAX = 40
-
-def _default_device() -> str:
-    """Best available accelerator: `"cuda"` -> `"mps"` -> `"cpu"`."""
-    if torch.cuda.is_available():
-        return "cuda"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
 
 
 # config + entry point
@@ -117,7 +110,7 @@ class TrainConfig:
 
     # runtime
     seed:           int  = 0
-    device:         str  = field(default_factory=_default_device)
+    device:         str  = field(default_factory=default_device)
     compile_model:  bool | None = None  # auto: True iff len(poly_ids)==1
 
     def __post_init__(self):

@@ -32,6 +32,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 # local imports
+from ..device    import default_device
 from ..dualgraph import DualGraph
 from ..geometry  import canonical_simps, is_regular
 from ..model     import DualGNN
@@ -101,7 +102,7 @@ def reinforce(
     invalid_reward : float, optional
         Reward assigned to invalid (non-regular) draws. Default -2.0.
     """
-    device  = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    device  = device or default_device()
     src_run = init_ckpt.parent
     print(f"[reinforce] device={device}", flush=True)
 

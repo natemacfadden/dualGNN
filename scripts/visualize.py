@@ -45,6 +45,7 @@ from matplotlib.widgets import Button, TextBox
 from scipy.spatial import ConvexHull
 
 # local imports
+from dualgnn.device    import default_device
 from dualgnn.dualgraph import DualGraph
 from dualgnn.geometry  import enum_lattice_pts
 from dualgnn.model     import DualGNN
@@ -57,9 +58,7 @@ plt.rcParams["keymap.save"] = []
 # CLI + helpers
 # =============
 def autodetect_device() -> str:
-    if torch.cuda.is_available():           return "cuda"
-    if torch.backends.mps.is_available():   return "mps"
-    return "cpu"
+    return default_device()
 
 # layout
 # ======

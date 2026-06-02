@@ -64,7 +64,7 @@ def add_cfg_args(parser, cfg_cls):
         kwargs = {"dest": f.name, "default": argparse.SUPPRESS}
         if f.name in HELP:
             kwargs["help"] = HELP[f.name]
-        if f.type == "bool | None":
+        if f.type in ("bool", "bool | None"):
             parser.add_argument(
                 flag, action=argparse.BooleanOptionalAction, **kwargs,
             )

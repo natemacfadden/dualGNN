@@ -20,6 +20,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# tests/ need pytest; the package itself suffices for inference
+test = ["pytest"]
 # Training additionally needs CYTools + its native libraries (ppl, normaliz,
 # python-flint), none of which are pip-installable. Use the conda environment:
 #     conda env create -f environment.yml

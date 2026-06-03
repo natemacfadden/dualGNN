@@ -31,6 +31,8 @@ The model
 
 Most of the performance is attributed to the inductive bias. See the paper.
 
+The major limitations are that this model was trained with $K=16$ message passing rounds - if the polygon of interest has $\mathrm{diam}(G)\gtrsim K$ then performance is expected to degrade. Additionally, while dualGNN enhances the sampling of *regular* triangulations generally, it does not only sample regular triangulations (irregulars sneak in). Neither issue inhibits use in practice - most polygons of interest have much smaller diameters and regularity is typically so prevalent that filtering on it is a good strategy.
+
 For string theory applications, it generates uniform samples (when paired with my [NTFE algorithm](https://arxiv.org/abs/2309.10855)) up to $h^{1,1}=86$. Likely higher (we generated samples consistent with being uniform at $h^{1,1}=128$, but it's hard to gain enough confidence in uniformity here). The model runs all the way up to the max $h^{1,1}=491$, but checking uniformity here would require assessing it out of a pool of [at least](https://arxiv.org/abs/2602.16909) $10^{167}$, which our statistics definitely cannot do. Also, we'd likely need more message passing rounds ($K=16$ in attached model).
 
 ## Results

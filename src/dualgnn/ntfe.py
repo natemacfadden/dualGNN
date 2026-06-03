@@ -281,15 +281,19 @@ def _decompose_2faces(poly):
     """
     For each 2-face of `poly`: identify its 2D-geometry class (so same-shape
     faces share an FRT pool) and precompute the FRT-vertex -> parent-label
-    lookup so the sampling loop only does array indexing. Returns four parallel
-    lists:
+    lookup so the sampling loop only does array indexing.
 
-      shapes        : (n_pts, 2) int64 arrays, one per distinct geometry
-      shape_keys    : per 2-face, the index into `shapes`
-      src_to_labels : per 2-face, (n_pts,) lookup. The i-th entry is the
-                      parent-polytope label of the i-th point of this
-                      face's shape rep.
-      face_polys    : per 2-face, the 2-face as a `cytools.Polytope`
+    Returns
+    -------
+    shapes : list[np.ndarray]
+        (n_pts, 2) int64 arrays, one per distinct geometry.
+    shape_keys : list[int]
+        Per 2-face, the index into `shapes`.
+    src_to_labels : list[np.ndarray]
+        Per 2-face, an (n_pts,) lookup; the i-th entry is the parent-polytope
+        label of the i-th point of this face's shape rep.
+    face_polys : list[Polytope]
+        Per 2-face, the 2-face as a `cytools.Polytope`.
     """
     shapes:        list[np.ndarray] = []
     shape_keys:    list[int]        = []

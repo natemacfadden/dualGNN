@@ -3,7 +3,7 @@
 
 **Paper:** [Sampling Triangulations and Calabi-Yau Threefolds with Autoregressive GNNs](https://arxiv.org/abs/2605.27770) (arXiv:2605.27770; [PDF in this repo](paper.pdf))
 
-[![DOI](https://zenodo.org/badge/1245826297.svg)](https://zenodo.org/badge/latestdoi/1245826297)
+[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.20622920.svg)](https://doi.org/10.5281/zenodo.20622920)
 
 <p align="center"><img src="docs/gui_demo.gif"/></p>
 
@@ -200,7 +200,7 @@ and/or this repository:
 @software{dualGNN,
   author  = {MacFadden, Nate},
   title   = {dualGNN},
-  doi     = {10.5281/zenodo.XXXXXXXX},
+  doi     = {10.5281/zenodo.20622920},
   url     = {https://github.com/natemacfadden/dualGNN},
   orcid   = {0000-0002-8481-3724},
 }

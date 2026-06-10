@@ -77,21 +77,42 @@ conda env create -f environment.yml
 conda activate dualgnn
 ```
 
-For inference only, you can instead `pip install -e .` into an existing environment; everything it needs is on PyPI. By default this pulls the standard PyTorch build, which on Linux bundles CUDA (a multi-GB download). On a CPU-only or Apple-silicon machine, install the matching wheel first (e.g. `pip install torch --index-url https://download.pytorch.org/whl/cpu`) then `pip install -e .`. Training is conda-only because it needs CYTools, so `pip install -e .[train]` fails on purpose and points you back to the conda env above.
+For inference only, you can instead `pip install -e .` into an existing environment; everything it needs is on PyPI, and the model checkpoints ship inside the package. By default this pulls the standard PyTorch build, which on Linux bundles CUDA (a multi-GB download). On a CPU-only or Apple-silicon machine, install the matching wheel first (e.g. `pip install torch --index-url https://download.pytorch.org/whl/cpu`) then `pip install -e .`. The tutorials' plotting and the GUI additionally need matplotlib (`pip install -e .[viz]`). Training is conda-only because it needs CYTools, so `pip install -e .[train]` fails on purpose and points you back to the conda env above.
 
 ## Inference
 
-Load a trained checkpoint and sample FRTs of a polygon:
+One call samples deduplicated fine triangulations of a polygon with the
+shipped model (packaged as data -- works from any install, CPU included):
 
 ```python
 import numpy as np
+from dualgnn import sample_frts
+
+pts = np.array([[x, y] for x in range(5) for y in range(5)], dtype=np.int64)  # [0,4]^2
+fts = sample_frts(pts, 8)                              # (<=8, 32, 3) int8
+fts = sample_frts(pts, 8, only_regular=True, seed=0)   # FRTs only
+```
+
+The lower-level pieces are available too -- `DualGNN.default()` is the
+shipped REINFORCE-finetuned model (cached per device), `DualGraph` the
+candidate complex, and `sample` the raw with-replacement sampler:
+
+```python
 from dualgnn       import DualGraph, sample
 from dualgnn.model import DualGNN
 
-pts = np.array([[x, y] for x in range(5) for y in range(5)], dtype=np.int64)  # [0,4]^2
-net = DualGNN.from_ckpt("ckpts/reinforce.pt")
+net = DualGNN.default()                  # or DualGNN.from_ckpt(path)
 fts = sample(net, DualGraph(pts), Ntriangs=8)          # (8, 32, 3) int8
 ```
+
+**Stable contract** (downstream consumers, e.g. CYTools, rely on this):
+`pts` is the polygon's full lattice-point set as an `(Npts, 2)` int array,
+and returned simplices index into `pts` in the caller's row order. Every
+sample is a fine triangulation of the full point set, returned in canonical
+form (vertex indices sorted within each simp, simps lex-sorted), so exact
+duplicates compare equal under `np.unique(axis=0)`. Regularity is learned,
+not guaranteed -- filter with `only_regular=True` (or your own check) if
+you need FRTs.
 
 See `tutorials/inference_demo.ipynb` for a runnable version with plotting.
 
@@ -123,7 +144,7 @@ from dualgnn.ntfe  import sample_ntfes
 verts = [[-1, -1, -1, -1], [-1, -1, -1,  3], [-1, -1,  3, -1], [-1,  3, -1, -1],
          [ 1, -1, -1, -1], [ 1, -1, -1,  3], [ 1, -1,  3, -1], [ 1,  3, -1, -1]]
 poly = Polytope(np.array(verts, dtype=np.int64))                           # reflexive, h11 = 86
-net  = DualGNN.from_ckpt("ckpts/reinforce.pt")
+net  = DualGNN.default()
 heights = sample_ntfes(poly, net, N=20, N_face_triangs=1_000, n_workers=4) # (20, npts) float64
 ```
 
@@ -161,7 +182,8 @@ pre-harvest a specific polygon via `python scripts/harvest.py --poly-id N`.
 
 ```
 src/dualgnn/          library code (DualGraph, DualGNN, sampler, training)
+src/dualgnn/ckpts/    shipped checkpoints, packaged as data (D32K16 SFT,
+                      D32K16 + REINFORCE = DualGNN.default())
 scripts/              CLI entry points (train, reinforce, harvest, make_polygons, visualize)
-ckpts/                shipped checkpoints (D32K16 SFT, D32K16 + REINFORCE)
 tutorials/             inference, NTFE demos
 ```

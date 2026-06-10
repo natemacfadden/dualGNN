@@ -13,17 +13,18 @@ dependencies = [
     "numpy",
     "scipy",
     "numba",
-    "polars",
     "torch>=2.7",
-    "matplotlib",
     "regfans",
 ]
 
 [project.optional-dependencies]
 # tests/ need pytest; the package itself suffices for inference
 test = ["pytest"]
+# plotting for the tutorials and the GUI (scripts/visualize.py)
+viz = ["matplotlib"]
 # Training additionally needs CYTools + its native libraries (ppl, normaliz,
-# python-flint), none of which are pip-installable. Use the conda environment:
+# python-flint), none of which are pip-installable, plus polars for the data
+# layer. Use the conda environment:
 #     conda env create -f environment.yml
 # The sentinel below makes `pip install .[train]` fail loudly at resolve time
 # rather than leave someone with a half-working (CYTools-less) setup.
@@ -34,3 +35,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# shipped model checkpoints (DualGNN.default() loads reinforce.pt)
+dualgnn = ["ckpts/*.pt"]

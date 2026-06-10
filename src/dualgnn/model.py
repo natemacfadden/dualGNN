@@ -22,6 +22,7 @@
 # external imports
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 import pickle
 
@@ -219,6 +220,39 @@ class DualGNN(nn.Module):
         )
         self.norm = nn.LayerNorm(D)
         self.head = nn.Linear(D, 1)
+
+    # default() cache, keyed by str(device)
+    _default_nets: dict[str, "DualGNN"] = {}
+
+    @classmethod
+    def default(
+        cls,
+        device: str | torch.device | None = None,
+    ) -> "DualGNN":
+        """
+        Load the shipped default model: the `D=32`, `K=16` dualGNN after
+        REINFORCE fine-tuning (`dualgnn/ckpts/reinforce.pt`, packaged as
+        data, so this works from any install -- no repo checkout needed).
+        Cached per device; repeated calls return the same instance.
+
+        Parameters
+        ----------
+        device : str or torch.device, optional
+            Target device. Default `None` -> best available (CUDA, else
+            MPS, else CPU). CPU-only environments are fully supported.
+
+        Returns
+        -------
+        net : DualGNN
+        """
+        if device is None:
+            device = default_device()
+        key = str(device)
+        if key not in cls._default_nets:
+            ref = resources.files("dualgnn") / "ckpts" / "reinforce.pt"
+            with resources.as_file(ref) as path:
+                cls._default_nets[key] = cls.from_ckpt(path, device=device)
+        return cls._default_nets[key]
 
     @classmethod
     def from_ckpt(

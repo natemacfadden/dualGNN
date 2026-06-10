@@ -38,7 +38,6 @@ from dualgnn.model    import DualGNN
 # config
 # ======
 _HERE        = os.path.dirname(__file__)
-CKPT         = os.path.join(_HERE, "..", "ckpts", "reinforce.pt")
 OUT_DIR      = _HERE
 SEED         = 0
 CACHE_MAX_MB = 50              # skip the sample cache if it would exceed this
@@ -180,7 +179,7 @@ def run(poly, samples):
     samples : int
         Number of draws per sampler.
     """
-    net = DualGNN.from_ckpt(CKPT)
+    net = DualGNN.default()
     pts = np.asarray(enum_lattice_pts(np.array(poly["verts"], dtype=np.int64)),
                      dtype=np.int64)
     N, tag = poly["N_FRT"], poly["tag"]

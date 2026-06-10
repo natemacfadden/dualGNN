@@ -1,0 +1,3 @@
+# Cython sources: the generated .c ships in the sdist too, but setup.py's
+# cythonize() needs the .pyx present to build from an sdist at all
+recursive-include src *.pyx

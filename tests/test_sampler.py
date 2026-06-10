@@ -21,15 +21,12 @@
 
 # external imports
 from collections import Counter
-import os
 
 import numpy as np
 
 # local imports
 from dualgnn import DualGraph, sample
 from dualgnn.model import DualGNN
-
-_CKPT = os.path.join(os.path.dirname(__file__), "..", "ckpts", "reinforce.pt")
 
 
 def _two_area(tri):
@@ -48,7 +45,7 @@ def test_sample_outputs_are_valid_fine_triangulations():
     pts = np.array([[x, y] for x in range(4) for y in range(4)],   # [0,3]^2
                    dtype=np.int64)
     g   = DualGraph(pts)
-    net = DualGNN.from_ckpt(_CKPT)
+    net = DualGNN.default()
     fts = sample(net, g, Ntriangs=4, seed=0)
 
     assert fts.shape == (4, g.N_simps_per_ft, 3)

@@ -28,8 +28,75 @@ import torch.nn.functional as F
 
 # local imports
 from .dualgraph import DualGraph
-from .geometry  import canonical_simps
+from .geometry  import canonical_simps, is_regular
 from .model     import DualGNN
+
+
+# front door
+# ==========
+def sample_frts(
+    pts: np.ndarray,
+    N:   int,
+    *,
+    model:        DualGNN | None = None,
+    only_regular: bool           = False,
+    seed:         int | None     = None,
+    beta:         float          = 1.0,
+    verbose:      bool           = False,
+) -> np.ndarray:
+    """
+    Sample `N` fine triangulations of a 2D lattice polygon in one call:
+    build the `DualGraph`, sample with the shipped default model (or
+    `model`), deduplicate, and optionally keep only regular ones.
+
+    Stable contract (downstream code, e.g. CYTools, relies on it):
+        - `pts` is the polygon's FULL lattice-point set, `(Npts, 2)` int,
+          and returned simplices index into `pts` in the caller's row order
+        - every sample is a fine triangulation of all of `pts`; simplices
+          come back canonicalized (vertex indices sorted ascending, simps
+          lex-sorted), so exact duplicates compare equal
+        - sampling is with replacement; the output is deduplicated, so it
+          may contain fewer than `N` rows
+
+    Quality caveat: the shipped model runs `K = 16` message-passing
+    rounds. On polygons whose dual graph has diameter >> `K` (very large
+    2-faces, extreme `h^{1,1}`), samples remain valid fine triangulations
+    but uniformity degrades silently -- there is no error to catch.
+
+    Parameters
+    ----------
+    pts : ndarray
+        `(Npts, 2)` int. All lattice points of the polygon (incl. interior).
+    N : int
+        Number of draws (before dedup / regularity filtering).
+
+    model : DualGNN, optional
+        Sampler network. Default `None` -> `DualGNN.default()`.
+    only_regular : bool, optional
+        If True, keep only regular triangulations (checked with
+        `geometry.is_regular`). Default False.
+    seed : int, optional
+        Seed for the draws.
+    beta : float, optional
+        Inverse temperature (see `sample`). Default `1.0`.
+    verbose : bool, optional
+        Forwarded to `sample`. Default False.
+
+    Returns
+    -------
+    out : ndarray
+        `(M, N_simps_per_ft, 3)` int8 (int16 when `Npts > 128`), `M <= N`.
+        Deduplicated canonical-form fine triangulations.
+    """
+    if model is None:
+        model = DualGNN.default()
+    out = sample(model, DualGraph(pts), Ntriangs=N,
+                 beta=beta, seed=seed, verbose=verbose)
+    out = np.unique(out, axis=0)
+    if only_regular:
+        keep = np.array([is_regular(pts, s) for s in out], dtype=bool)
+        out  = out[keep]
+    return out
 
 
 # main method

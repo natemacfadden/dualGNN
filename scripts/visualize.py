@@ -23,7 +23,7 @@
 #               |x|<= / |y|<= bounds + [Random]. Click in the polygon panel
 #               to add/remove a hull vertex.
 #
-# Usage:    python scripts/visualize.py --ckpt ckpts/reinforce.pt
+# Usage:    python scripts/visualize.py
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -736,9 +736,9 @@ def main():
                     "polygon (left), inspect its dual graph and the model's "
                     "next-simp distribution (right).",
     )
-    p.add_argument("--ckpt", type=Path, default=Path("ckpts/reinforce.pt"),
-                   help="trained DualGNN checkpoint "
-                        "(default: ckpts/reinforce.pt)")
+    p.add_argument("--ckpt", type=Path, default=None,
+                   help="trained DualGNN checkpoint (default: the shipped "
+                        "model, DualGNN.default())")
     p.add_argument("--device", type=str, default=None,
                    help="cuda|mps|cpu; autodetected if omitted")
     args = p.parse_args()
@@ -748,7 +748,8 @@ def main():
     pts = random_polygon(8, 8, rng)
     if pts is None:
         raise SystemExit("[visualize] failed to generate a random polygon")
-    net = DualGNN.from_ckpt(args.ckpt, device)
+    net = (DualGNN.default(device) if args.ckpt is None
+           else DualGNN.from_ckpt(args.ckpt, device))
     print(f"[visualize] device={device}", flush=True)
     viz = Visualizer(net, device, pts)   # noqa: F841
     plt.show()

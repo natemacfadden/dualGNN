@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: dualGNN
+abstract: "An autoregressive message-passing GNN for sampling fine, regular triangulations (FRTs) of convex lattice polytopes, with applications to sampling Calabi-Yau threefolds."
+authors:
+  - family-names: MacFadden
+    given-names: Nate
+    orcid: https://orcid.org/0000-0002-8481-3724
+repository-code: https://github.com/natemacfadden/dualGNN
+license: GPL-3.0-or-later
+# doi: 10.5281/zenodo.XXXXXXXX
+type: software
+references:
+  - type: article
+    title: "Sampling Triangulations and Calabi-Yau Threefolds with Autoregressive GNNs"
+    authors:
+      - family-names: MacFadden
+        given-names: Nate
+        orcid: https://orcid.org/0000-0002-8481-3724
+    doi: 10.48550/arXiv.2605.27770
+    url: https://arxiv.org/abs/2605.27770

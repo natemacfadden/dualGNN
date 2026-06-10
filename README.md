@@ -3,6 +3,8 @@
 
 **Paper:** [Sampling Triangulations and Calabi-Yau Threefolds with Autoregressive GNNs](https://arxiv.org/abs/2605.27770) (arXiv:2605.27770; [PDF in this repo](paper.pdf))
 
+[![DOI](https://zenodo.org/badge/1245826297.svg)](https://zenodo.org/badge/latestdoi/1245826297)
+
 <p align="center"><img src="docs/gui_demo.gif"/></p>
 
 This repo contains a small **graph-neural-network** sampler for **fine regular triangulations** (FRTs) of convex 2D lattice polygons.
@@ -177,6 +179,32 @@ python scripts/reinforce.py \
 
 The FRT pool is auto-harvested per polygon on first use; you can also
 pre-harvest a specific polygon via `python scripts/harvest.py --poly-id N`.
+
+## Citation
+
+If you use `dualGNN`, please cite [Sampling Triangulations and Calabi-Yau
+Threefolds with Autoregressive GNNs](https://arxiv.org/abs/2605.27770):
+
+```bibtex
+@article{MacFadden:2605.27770,
+  author  = {MacFadden, Nate},
+  title   = {Sampling Triangulations and Calabi-{Y}au Threefolds with Autoregressive {GNN}s},
+  doi     = {10.48550/arXiv.2605.27770},
+  url     = {https://arxiv.org/abs/2605.27770},
+}
+```
+
+and/or this repository:
+
+```bibtex
+@software{dualGNN,
+  author  = {MacFadden, Nate},
+  title   = {dualGNN},
+  doi     = {10.5281/zenodo.XXXXXXXX},
+  url     = {https://github.com/natemacfadden/dualGNN},
+  orcid   = {0000-0002-8481-3724},
+}
+```
 
 ## Layout
 

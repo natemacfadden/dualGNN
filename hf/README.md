@@ -72,9 +72,13 @@ net  = DualGNN.from_ckpt(path)
 
 ```bibtex
 @article{MacFadden:2605.27770,
-  author  = {MacFadden, Nate},
-  title   = {Sampling Triangulations and Calabi-{Y}au Threefolds with Autoregressive {GNN}s},
-  doi     = {10.48550/arXiv.2605.27770},
-  url     = {https://arxiv.org/abs/2605.27770},
+  author        = {MacFadden, Nate},
+  title         = {Sampling Triangulations and Calabi-{Y}au Threefolds with Autoregressive {GNN}s},
+  year          = {2026},
+  eprint        = {2605.27770},
+  archivePrefix = {arXiv},
+  primaryClass  = {hep-th},
+  doi           = {10.48550/arXiv.2605.27770},
+  url           = {https://arxiv.org/abs/2605.27770},
 }
 ```

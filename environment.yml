@@ -1,4 +1,4 @@
-# Conda environment for dualgnn_paper.
+# Conda environment for dualGNN (training + development).
 # Install: conda env create -f environment.yml
 #
 # Default torch is the cu130 CUDA build (includes Blackwell / sm_120).

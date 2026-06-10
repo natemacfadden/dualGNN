@@ -3,7 +3,10 @@
 
 **Paper:** [Sampling Triangulations and Calabi-Yau Threefolds with Autoregressive GNNs](https://arxiv.org/abs/2605.27770) (arXiv:2605.27770; [PDF in this repo](paper.pdf))
 
+[![PyPI](https://img.shields.io/pypi/v/dualgnn)](https://pypi.org/project/dualgnn/)
 [![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.20622920.svg)](https://doi.org/10.5281/zenodo.20622920)
+[![HF](https://img.shields.io/badge/%F0%9F%A4%97-model-yellow)](https://huggingface.co/natemacfadden/dualGNN)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/natemacfadden/dualGNN/blob/main/tutorials/inference_demo.ipynb)
 
 <p align="center"><img src="docs/gui_demo.gif"/></p>
 
@@ -18,7 +21,7 @@ The idea is to represent a triangulation $\mathcal{T}_i$ by its [dual graph](htt
 2) sampling a node according to these probabilities, and then
 3) masking out nodes which cannot coexist with the newly chosen simplex.
 
-To give the model enough information to do this, we encode the polytope's 'oriented matroid' via certain vectors corresponding to 'signed circuits' (see [page 17 here](https://imag.umontpellier.fr/~ramirez/LectureSL6.pdf) or [this wonderful book](https://link.springer.com/book/10.1007/978-3-642-12971-1)). The matroid characterizes the count of fine triangulations while our specific vectors (slightly richer than actual circuits) characterize the regularity of these triangulations ([DRS](https://link.springer.com/book/10.1007/978-3-642-12971-1)). More so, circuits are invariant under the $\mathrm{GL}_N(\mathbb{Z})\ltimes\mathbb{Z}^N$ symmetries of the polytope (we weaken to $\mathrm{SL}_N(\mathbb{Z})\ltimes\mathbb{Z}^N$ - see paper), giving the model strong inductive bias. This information is specifically encoded on the edges of $G$ and is concatenated with the messages passed through said edges.
+To give the model enough information to do this, we encode the polytope's 'oriented matroid' via certain vectors corresponding to 'signed circuits' (see [page 17 here](https://imag.umontpellier.fr/~ramirez/LectureSL6.pdf) or [this wonderful book](https://link.springer.com/book/10.1007/978-3-642-12971-1)). The matroid characterizes the count of fine triangulations while our specific vectors (slightly richer than actual circuits) characterize the regularity of these triangulations ([DRS](https://link.springer.com/book/10.1007/978-3-642-12971-1)). More so, circuits are invariant under the $\mathrm{GL}(d,\mathbb{Z})\ltimes\mathbb{Z}^d$ symmetries of the polytope (we weaken to $\mathrm{SL}(d,\mathbb{Z})\ltimes\mathbb{Z}^d$ - see paper), giving the model strong inductive bias. This information is specifically encoded on the edges of $G$ and is concatenated with the messages passed through said edges.
 
 This model is trained via supervised learning on a pool of fine regular triangulations. We allow bootstrapping of the pool (similar to [CYTransformer](https://arxiv.org/abs/2507.03732)) since the polygons of primary interest have too many triangulations to enumerate (otherwise, enumerating them and sampling from them would be preferable). We also fine-tune with REINFORCE.
 
@@ -77,13 +80,17 @@ protocol ship in [`eval/`](eval/).
 
 ## Install
 
-Recommended
+For inference (sampling with the shipped model):
+```
+pip install dualgnn
+```
+The model checkpoints ship inside the package. By default this pulls the standard PyTorch build, which on Linux bundles CUDA (a multi-GB download); on a CPU-only or Apple-silicon machine, install the matching wheel first (e.g. `pip install torch --index-url https://download.pytorch.org/whl/cpu`) then `pip install dualgnn`. The tutorials' plotting and the GUI additionally need matplotlib (`pip install dualgnn[viz]`).
+
+For training (and development), use the conda environment -- the training pipeline needs CYTools, which pip cannot install (`pip install dualgnn[train]` fails on purpose and points you here):
 ```
 conda env create -f environment.yml
 conda activate dualgnn
 ```
-
-For inference only, you can instead `pip install -e .` into an existing environment; everything it needs is on PyPI, and the model checkpoints ship inside the package. By default this pulls the standard PyTorch build, which on Linux bundles CUDA (a multi-GB download). On a CPU-only or Apple-silicon machine, install the matching wheel first (e.g. `pip install torch --index-url https://download.pytorch.org/whl/cpu`) then `pip install -e .`. The tutorials' plotting and the GUI additionally need matplotlib (`pip install -e .[viz]`). Training is conda-only because it needs CYTools, so `pip install -e .[train]` fails on purpose and points you back to the conda env above.
 
 ## Inference
 
@@ -120,7 +127,8 @@ duplicates compare equal under `np.unique(axis=0)`. Regularity is learned,
 not guaranteed -- filter with `only_regular=True` (or your own check) if
 you need FRTs.
 
-See `tutorials/inference_demo.ipynb` for a runnable version with plotting.
+See `tutorials/inference_demo.ipynb` for a runnable version with plotting
+([open it in Colab](https://colab.research.google.com/github/natemacfadden/dualGNN/blob/main/tutorials/inference_demo.ipynb) -- no install needed).
 
 For comparison, two reference samplers are bundled (CYTools-free, both
 return `(simps, status)`):
@@ -191,10 +199,14 @@ Threefolds with Autoregressive GNNs](https://arxiv.org/abs/2605.27770):
 
 ```bibtex
 @article{MacFadden:2605.27770,
-  author  = {MacFadden, Nate},
-  title   = {Sampling Triangulations and Calabi-{Y}au Threefolds with Autoregressive {GNN}s},
-  doi     = {10.48550/arXiv.2605.27770},
-  url     = {https://arxiv.org/abs/2605.27770},
+  author        = {MacFadden, Nate},
+  title         = {Sampling Triangulations and Calabi-{Y}au Threefolds with Autoregressive {GNN}s},
+  year          = {2026},
+  eprint        = {2605.27770},
+  archivePrefix = {arXiv},
+  primaryClass  = {hep-th},
+  doi           = {10.48550/arXiv.2605.27770},
+  url           = {https://arxiv.org/abs/2605.27770},
 }
 ```
 
@@ -204,6 +216,7 @@ and/or this repository:
 @software{dualGNN,
   author  = {MacFadden, Nate},
   title   = {dualGNN},
+  year    = {2026},
   doi     = {10.5281/zenodo.20622920},
   url     = {https://github.com/natemacfadden/dualGNN},
   orcid   = {0000-0002-8481-3724},

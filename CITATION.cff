@@ -9,6 +9,8 @@ authors:
 repository-code: https://github.com/natemacfadden/dualGNN
 license: GPL-3.0-or-later
 doi: 10.5281/zenodo.20622920
+version: 0.0.3
+date-released: 2026-06-10
 type: software
 references:
   - type: article

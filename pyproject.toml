@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dualgnn"
-version = "0.0.2"
+version = "0.0.3"
 description = "Dual-graph GNN sampler for fine regular triangulations of 2D lattice polygons"
 authors = [{ name = "Nate MacFadden" }]
 license = "GPL-3.0-or-later"
@@ -16,6 +16,13 @@ dependencies = [
     "torch>=2.7",
     "regfans",
 ]
+
+[project.urls]
+Homepage        = "https://github.com/natemacfadden/dualGNN"
+Repository      = "https://github.com/natemacfadden/dualGNN"
+Paper           = "https://arxiv.org/abs/2605.27770"
+"Model weights" = "https://huggingface.co/natemacfadden/dualGNN"
+Archive         = "https://doi.org/10.5281/zenodo.20622920"
 
 [project.optional-dependencies]
 # tests/ need pytest; the package itself suffices for inference

@@ -87,7 +87,6 @@ def compute_bdry(pts: np.ndarray) -> np.ndarray:
             out.append((a, b))
             prev = cur_idx
 
-    # return
     if not out:
         return np.empty((0, 2), dtype=np.int64)
     return np.asarray(out, dtype=np.int64)
@@ -99,7 +98,7 @@ def enum_lattice_pts(verts: np.ndarray) -> np.ndarray | None:
     Enumerate every lattice point in the convex hull of `verts`.
 
     Takes the convex hull of `verts` and then filters lattice points in the
-    bounding box for those that lay lies inside the hull.
+    bounding box for those that lie inside the hull.
 
     There are much fancier methods to do this, but they aren't really needed
     here.
@@ -140,23 +139,21 @@ def enum_lattice_pts(verts: np.ndarray) -> np.ndarray | None:
         )
         return None
 
-    # filter the bounding box lattice points (in hull iff all CCW edges
-    # see (x, y) on the non-negative side)
+    # filter the bounding box lattice points. c = (x, y) is inside the (CCW)
+    # hull iff every directed edge (a, b) sees it on the non-negative side:
+    # twice-signed-area (b-a) x (c-a) >= 0
     x_lo, y_lo = v.min(axis=0)
     x_hi, y_hi = v.max(axis=0)
-    # c = (x, y) is inside the (CCW) hull iff every directed edge (a, b)
-    # sees it on the non-negative side: twice-signed-area (b-a) x (c-a) >= 0
-    N_hull = len(hull_v)
-    edges  = [(hull_v[i], hull_v[(i + 1) % N_hull]) for i in range(N_hull)]
-    def inside(c):
-        return all((b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]) >= 0
-                   for a, b in edges)
-    pts = [(x, y)
-           for x in range(int(x_lo), int(x_hi) + 1)
-           for y in range(int(y_lo), int(y_hi) + 1)
-           if inside((x, y))]
+    xs, ys = np.meshgrid(np.arange(x_lo, x_hi + 1, dtype=np.int64),
+                         np.arange(y_lo, y_hi + 1, dtype=np.int64),
+                         indexing="ij")
+    cand   = np.stack([xs.ravel(), ys.ravel()], axis=1)    # (Nbox, 2)
+    a      = hull_v                                        # (N_hull, 2)
+    b      = np.roll(hull_v, -1, axis=0)
+    cross  = ((b[:, 0] - a[:, 0]) * (cand[:, 1, None] - a[:, 1])
+            - (b[:, 1] - a[:, 1]) * (cand[:, 0, None] - a[:, 0]))
+    pts    = cand[(cross >= 0).all(axis=1)]
 
-    # return
     if len(pts) < 3:
         warnings.warn(
             f"enum_lattice_pts: only {len(pts)} lattice point(s) inside the "
@@ -164,7 +161,7 @@ def enum_lattice_pts(verts: np.ndarray) -> np.ndarray | None:
             f"Returning None."
         )
         return None
-    return np.asarray(pts, dtype=np.int64)
+    return pts
 
 # random polygons
 # ---------------
@@ -240,7 +237,6 @@ def random_lattice_polygon(
     # canonicalize and return
     pts = pts - pts.min(axis=0)
     pts = pts[np.lexsort(pts.T[::-1])]
-    
     return pts
 
 # triangulation
@@ -303,8 +299,8 @@ def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool:
             warnings.filterwarnings("error", module="regfans")
             return fan.is_regular()
     except (TimeoutError, Warning) as e:
-        print(f"[is_regular] {type(e).__name__}: {e} "
-              f"(Npts={len(pts)}, Nsimps={len(simps)})", flush=True)
+        warnings.warn(f"is_regular: {type(e).__name__}: {e} "
+                      f"(Npts={len(pts)}, Nsimps={len(simps)})")
         return False
     finally:
         signal.alarm(0)

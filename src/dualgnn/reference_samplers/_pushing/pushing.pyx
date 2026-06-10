@@ -4,6 +4,7 @@
 from libc.stdint cimport uint32_t, uint64_t
 from libc.stdlib cimport malloc, free
 import numpy as np
+import time
 
 
 # declare the external C function
@@ -27,7 +28,7 @@ cdef extern from "pushing.h":
 
 # Python-exposed wrapper
 # ----------------------
-def pushing(pts, seed=0, int max_num_simps=-1) -> tuple:
+def pushing(pts, seed=None, int max_num_simps=-1) -> tuple:
     """
     Generate a random fine pushing triangulation of a 2D lattice polygon.
 
@@ -36,7 +37,7 @@ def pushing(pts, seed=0, int max_num_simps=-1) -> tuple:
     pts : array-like of shape (n, 2), int
         Input lattice points.
     seed : int, optional
-        RNG seed. Default 0.
+        RNG seed. Defaults to a time-based value (as in `grow2d`).
     max_num_simps : int, optional
         Maximum number of simplices to allocate. Defaults to 3 * n.
 
@@ -71,6 +72,10 @@ def pushing(pts, seed=0, int max_num_simps=-1) -> tuple:
     # default allocation
     if max_num_simps < 0:
         max_num_simps = 3 * num_vecs
+
+    # seed
+    if seed is None:
+        seed = time.time_ns() % (2**64)
 
     # options
     cdef PushingOpts opts

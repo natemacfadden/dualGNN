@@ -731,7 +731,11 @@ class Visualizer:
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(
+        description="Interactive dualGNN AR-rollout viewer: build a lattice "
+                    "polygon (left), inspect its dual graph and the model's "
+                    "next-simp distribution (right).",
+    )
     p.add_argument("--ckpt", type=Path, default=Path("ckpts/reinforce.pt"),
                    help="trained DualGNN checkpoint "
                         "(default: ckpts/reinforce.pt)")

@@ -50,7 +50,7 @@ from .hparams            import (
     POLYGONS_PARQUET, FTS_DIR, VAL_FRAC, VAL_POLY_FRAC,
 )
 from .io                 import (
-    fts_path, save_fts, load_polygons, save_ckpt, load_ckpt,
+    fts_path, save_fts, load_polygon, save_ckpt, load_ckpt,
 )
 from .state              import PolyState
 from .target_conditional import SimpConditional
@@ -443,7 +443,11 @@ class Trainer:
         if not ckpts:
             return 0
         loaded = load_ckpt(ckpts[-1], self.cfg.device)
-        self.net.load_state_dict(loaded["state_dict"])
+        # strip any torch.compile prefix and load into the underlying module,
+        # so resume works regardless of the saving run's compile_model flag
+        state_dict = {k.replace("_orig_mod.", ""): v
+                      for k, v in loaded["state_dict"].items()}
+        getattr(self.net, "_orig_mod", self.net).load_state_dict(state_dict)
         self.optim.load_state_dict(loaded["optim_state"])
         if loaded.get("rng_state") is not None:
             torch.set_rng_state(loaded["rng_state"].cpu())
@@ -492,7 +496,7 @@ def load_poly_state(
     state : PolyState or None
         Per-polygon state, or `None` if the polygon has no FRTs at all.
     """
-    pts, role = load_polygons(run_polygons, id=poly_id)
+    pts, role = load_polygon(run_polygons, poly_id)
     bootstrap_kwargs = dict(
         grow2d_target=grow2d_target, split_seed=poly_id,
     )
@@ -767,7 +771,7 @@ def explore_polygon(
     if not new_simps:
         return stats
 
-    new_simps_arr = np.stack(new_simps).astype(np.int8)
+    new_simps_arr = np.stack(new_simps)
     new_split_arr = np.array(new_split, dtype=object)
 
     state.train_triangs = np.concatenate([
@@ -789,7 +793,7 @@ def explore_polygon(
         ["val"]   * len(state.val_triangs),
         dtype=object,
     )
-    save_fts(full_simps.astype(np.int8), full_split,
+    save_fts(full_simps, full_split,
              fts_path(state.poly_id, run_fts_dir))
     return stats
 

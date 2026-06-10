@@ -23,9 +23,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import pickle
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 # local imports
 from .device import default_device
@@ -53,6 +55,17 @@ class _Layer(nn.Module):
     rather than only at init, so every layer can directly see the current
     placement/legality state.
 
+    Implementation notes (the math matches the description above exactly;
+    the layout below avoids the memory traffic that used to dominate):
+        - messages reduce elementwise, so the circ columns of `agg` are
+          state-independent and computed once per forward by the caller
+          (`DualGNN._aggregate_circ`), not per layer and batch element
+        - on CUDA inference the `f` columns reduce via `segment_reduce`
+          over dst-sorted edges (contiguous segments, no atomics); under
+          grad (and off CUDA) they keep the original `scatter_reduce`
+        - `mlp[0]` is applied blockwise (one weight slice per input block),
+          so the wide `(f, agg, metadata)` concat is never materialized
+
     Parameters
     ----------
     D : int
@@ -78,7 +91,7 @@ class _Layer(nn.Module):
             nn.Linear(D, D),
         )
 
-    def forward(self, f, circ_features, edge_indices, metadata):
+    def forward(self, f, circ_agg, routing, metadata):
         """
         Apply one message-passing layer.
 
@@ -86,11 +99,16 @@ class _Layer(nn.Module):
         ----------
         f : Tensor
             `(batch_size, Nsimps, D)` float per-node hidden state.
-        circ_features : Tensor
-            `(Nedges, Dedge)` float per-edge circuit features (sender's
-            perspective), shared across the batch.
-        edge_indices : Tensor
-            `(2, Nedges)` long. Row 0 = sender simp index, row 1 = receiver.
+        circ_agg : Tensor
+            `(1, Nsimps, 3 * Dedge)` float per-node `(sum, min, max)` of
+            incoming-edge circuit features, shared across the batch
+            (`DualGNN._aggregate_circ`).
+        routing : tuple
+            `(src_sorted, dst_sorted, seg_lengths, isolated)` from
+            `DualGNN._routing`: sender / receiver simp index per dst-sorted
+            edge `(Nedges,)`, incoming-edge count per node `(Nsimps,)`, and
+            a `(Nsimps, 1)` bool mask of nodes with no incoming edges
+            (`None` if there are none).
         metadata : Tensor
             `(batch_size, Nsimps, Dmetadata)` float per-node state features
             (placed, legal).
@@ -100,42 +118,65 @@ class _Layer(nn.Module):
         f_new : Tensor
             `(batch_size, Nsimps, D)` float updated hidden state.
         """
-        # read dimensions/shapes
         batch_size, Nsimps, D = f.shape
-        Nedges  = circ_features.shape[0]
-        msg_dim = self.Dedge + D
+        src_sorted, dst_sorted, seg_lengths, isolated = routing
+        Nedges = src_sorted.shape[0]
 
-        # message routing
-        src     = edge_indices[0]
-        dst     = edge_indices[1]
-
-        # form the messages
-        # -----------------
+        # aggregate each node's incoming messages: per-edge sender features,
+        # reduced per node. Nodes with no incoming edges get 0
         f_norm   = self.norm(f)
-        f_sender = f_norm[:, src, :]
+        f_sender = f_norm[:, src_sorted, :]
+        if torch.is_grad_enabled() or f.device.type != "cuda":
+            # scatter_reduce: under grad because its backward distributes
+            # min/max gradients across ties exactly as before (ties are
+            # common -- symmetric nodes share hidden states -- and
+            # segment_reduce's backward picks a different subgradient at
+            # them), and off-CUDA because segment_reduce's CPU kernel
+            # benchmarks ~1.6x slower than this
+            idx   = dst_sorted.view(1, Nedges, 1).expand(batch_size,
+                                                         Nedges, D)
+            f_sum = torch.zeros(batch_size, Nsimps, D,
+                                device=f.device, dtype=f_sender.dtype)
+            f_min = torch.zeros_like(f_sum)
+            f_max = torch.zeros_like(f_sum)
+            f_sum.scatter_reduce_(1, idx, f_sender, reduce="sum",
+                                  include_self=False)
+            f_min.scatter_reduce_(1, idx, f_sender, reduce="amin",
+                                  include_self=False)
+            f_max.scatter_reduce_(1, idx, f_sender, reduce="amax",
+                                  include_self=False)
+        else:
+            # CUDA inference: contiguous segment reductions over the
+            # dst-sorted edges, with no atomics. ~1.6x faster than scatter
+            lengths = seg_lengths.view(1, Nsimps).expand(batch_size, Nsimps)
+            f_sum = torch.segment_reduce(f_sender, "sum", lengths=lengths,
+                                         axis=1, unsafe=True, initial=0.0)
+            f_min = torch.segment_reduce(f_sender, "min", lengths=lengths,
+                                         axis=1, unsafe=True,
+                                         initial=float("inf"))
+            f_max = torch.segment_reduce(f_sender, "max", lengths=lengths,
+                                         axis=1, unsafe=True,
+                                         initial=float("-inf"))
+            if isolated is not None:
+                f_min = f_min.masked_fill(isolated, 0.0)
+                f_max = f_max.masked_fill(isolated, 0.0)
 
-        # add the circ_features to each feature vector
-        msg = torch.cat([
-            circ_features.unsqueeze(0).expand(batch_size, -1, -1),
-            f_sender,
-        ], dim=-1)
-
-        # aggregation containers
-        agg_sum = torch.zeros(batch_size, Nsimps, msg_dim,
-                              device=f.device, dtype=msg.dtype)
-        agg_min = torch.zeros(batch_size, Nsimps, msg_dim,
-                              device=f.device, dtype=msg.dtype)
-        agg_max = torch.zeros(batch_size, Nsimps, msg_dim,
-                              device=f.device, dtype=msg.dtype)
-
-        # send the messages
-        idx     = dst.view(1, Nedges, 1).expand(batch_size, Nedges, msg_dim)
-        agg_sum.scatter_reduce_(1, idx, msg, reduce="sum",  include_self=False)
-        agg_min.scatter_reduce_(1, idx, msg, reduce="amin", include_self=False)
-        agg_max.scatter_reduce_(1, idx, msg, reduce="amax", include_self=False)
-
-        agg = torch.cat([agg_sum, agg_min, agg_max], dim=-1)
-        return f + self.mlp(torch.cat([f_norm, agg, metadata], dim=-1))
+        # apply mlp[0] blockwise. Its weight columns follow the layout
+        #   [f | circ_sum, f_sum | circ_min, f_min | circ_max, f_max | meta]
+        # so slicing them lets the batch-independent circ blocks fold into a
+        # single bias-like term, and spares materializing the wide concat
+        De = self.Dedge
+        Wf, Wcs, Ws, Wcm, Wm, Wcx, Wx, Wmeta = torch.split(
+            self.mlp[0].weight,
+            [D, De, D, De, D, De, D, self.Dmetadata], dim=1,
+        )
+        cs, cm, cx = circ_agg.split(De, dim=-1)
+        const = (F.linear(cs, Wcs) + F.linear(cm, Wcm) + F.linear(cx, Wcx)
+                 + self.mlp[0].bias)
+        h = (F.linear(torch.cat([f_norm, f_sum, f_min, f_max], dim=-1),
+                      torch.cat([Wf, Ws, Wm, Wx], dim=1))
+             + F.linear(metadata, Wmeta) + const)
+        return f + self.mlp[2](self.mlp[1](h))
 
 class DualGNN(nn.Module):
     """
@@ -205,7 +246,16 @@ class DualGNN(nn.Module):
         """
         if device is None:
             device = default_device()
-        ckpt = torch.load(path, map_location=device, weights_only=False)
+        try:
+            ckpt = torch.load(path, map_location=device, weights_only=True)
+        except pickle.UnpicklingError as e:
+            raise RuntimeError(
+                f"{path} is not loadable with weights_only=True (it predates "
+                f"dualgnn's weights_only-safe ckpt format). If you trust the "
+                f"file, rewrite it in place with:\n"
+                f"    from dualgnn.training.io import resave_ckpt_safe\n"
+                f"    resave_ckpt_safe({str(path)!r})"
+            ) from e
         hp   = ckpt["hparams"]
         net  = cls(D=hp["d_model"], K=hp["k_rounds"]).to(device).eval()
         net.load_state_dict({
@@ -213,6 +263,52 @@ class DualGNN(nn.Module):
             for k, v in ckpt["state_dict"].items()
         })
         return net
+
+    @staticmethod
+    def _routing(edge_indices, *, Nsimps):
+        """
+        Static per-graph message routing shared by every `_Layer` call:
+        sender / receiver indices in dst-sorted order, per-node incoming-edge
+        counts (the segment lengths), and a mask of isolated nodes (`None`
+        when every node has an incoming edge, the usual case).
+
+        Returns
+        -------
+        src_sorted, dst_sorted : Tensor
+            `(Nedges,)` long.
+        seg_lengths : Tensor
+            `(Nsimps,)` long.
+        isolated : Tensor or None
+            `(Nsimps, 1)` bool, or `None`.
+        """
+        order       = torch.argsort(edge_indices[1])
+        src_sorted  = edge_indices[0][order]
+        dst_sorted  = edge_indices[1][order]
+        seg_lengths = torch.bincount(edge_indices[1], minlength=Nsimps)
+        isolated    = (seg_lengths == 0).view(Nsimps, 1)
+        return (src_sorted, dst_sorted, seg_lengths,
+                isolated if isolated.any() else None)
+
+    def _aggregate_circ(self, circ_features, edge_indices, *, Nsimps):
+        """
+        Per-node `(sum, min, max)` of incoming-edge circuit features: the
+        state-independent columns of every `_Layer`'s aggregation, computed
+        once per forward instead of per layer and batch element.
+
+        Returns
+        -------
+        circ_agg : Tensor
+            `(1, Nsimps, 3 * Dedge)` float.
+        """
+        Nedges = edge_indices.shape[1]
+        idx    = edge_indices[1].view(Nedges, 1).expand(Nedges, self.Dedge)
+        aggs   = []
+        for reduce in ("sum", "amin", "amax"):
+            agg = circ_features.new_zeros(Nsimps, self.Dedge)
+            agg.scatter_reduce_(0, idx, circ_features, reduce=reduce,
+                                include_self=False)
+            aggs.append(agg)
+        return torch.cat(aggs, dim=-1).unsqueeze(0)
 
     def forward(self, circ_features, edge_indices, placed, legal):
         """
@@ -248,11 +344,14 @@ class DualGNN(nn.Module):
             legal.float().unsqueeze(-1),
         ], dim=-1)
 
-        f = self.init_mlp(metadata)
+        f        = self.init_mlp(metadata)
+        circ_agg = self._aggregate_circ(circ_features, edge_indices,
+                                        Nsimps=placed.shape[-1])
+        routing  = self._routing(edge_indices, Nsimps=placed.shape[-1])
 
         # K message-passing rounds
         for layer in self.layers:
-            f = layer(f, circ_features, edge_indices, metadata)
+            f = layer(f, circ_agg, routing, metadata)
 
         # project to logits
         f      = self.norm(f)

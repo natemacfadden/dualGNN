@@ -26,9 +26,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+
+if TYPE_CHECKING:
+    from torch.utils.tensorboard import SummaryWriter
 
 # local imports
 from ..device    import default_device

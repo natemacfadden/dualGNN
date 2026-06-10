@@ -39,12 +39,12 @@ def sample(
     dualgraph: DualGraph,
     Ntriangs:  int,
     *,
-    device:     str | torch.device | None = None,
-    batch_size: int = 256,
-    beta:       float = 1.0,
-    seed:       int | None = None,
-    verbose:    bool = True,
-    compile:    bool = False,
+    device:        str | torch.device | None = None,
+    batch_size:    int = 256,
+    beta:          float = 1.0,
+    seed:          int | None = None,
+    verbose:       bool = True,
+    compile_model: bool = False,
 ) -> np.ndarray:
     """
     Generate `Ntriangs` triangulations from the dualGNN sampler.
@@ -72,7 +72,7 @@ def sample(
         Seed for the random number generator.
     verbose : bool, optional
         Print a warning when `beta != 1.0`. Default True.
-    compile : bool, optional
+    compile_model : bool, optional
         If True, wrap `net` with `torch.compile(net, dynamic=True)`. ~1.9x
         speedup on Npts=64 polygons but pays ~10s compile on first call. For
         repeated calls, compile once externally instead. Default False.
@@ -80,9 +80,9 @@ def sample(
     Returns
     -------
     out : ndarray
-        `(Ntriangs, N_simps_per_ft, 3)` int8. Each FRT in canonical form:
-        each simp's three point indices sorted ascending, simps lex-sorted
-        within the FRT.
+        `(Ntriangs, N_simps_per_ft, 3)` int8 (int16 when `Npts > 128`). Each
+        FRT in canonical form: each simp's three point indices sorted
+        ascending, simps lex-sorted within the FRT.
     """
     # check/set inputs
     # ----------------
@@ -90,8 +90,8 @@ def sample(
         device = next(net.parameters()).device
 
     if verbose and beta != 1.0:
-        print(f"beta = {beta}... set to 1 for uniform sampling...")
-        print( "disable warning with verbose=False")
+        print(f"warning: beta = {beta} samples non-uniformly; use beta=1.0 "
+              f"for uniform-over-FRT sampling (silence with verbose=False)")
 
     if seed is None:
         gen = None
@@ -116,7 +116,7 @@ def sample(
     net.eval() # turn training mode off
     # `dynamic=True` handles the trailing partial batch when batch_size does
     # not divide Ntriangs; idempotent if `net` is already a compiled module.
-    if compile and not hasattr(net, "_orig_mod"):
+    if compile_model and not hasattr(net, "_orig_mod"):
         net = torch.compile(net, dynamic=True)
     while N_out < Ntriangs:
         n = min(batch_size, Ntriangs - N_out)   # triangs in this batch
@@ -252,19 +252,33 @@ def ar_rollout_batch(
     """
     Nsimps = compat.shape[0]
     placed = torch.zeros(batch, Nsimps, dtype=torch.bool, device=device)
+    legal  = torch.ones(batch, Nsimps, dtype=torch.bool, device=device)
     log_probs_sum = (
         torch.zeros(batch, device=device) if track_log_probs else None
     )
 
     for step in range(N_simps_per_ft):
-        legal  = compute_legal(placed, compat)
         logits = net(circ_features, edge_indices, placed, legal) * beta
         logits = logits.masked_fill(~legal, float("-inf"))
         log_p  = F.log_softmax(logits, dim=-1)
-        picks  = torch.multinomial(log_p.exp(), 1,
-                                   generator=generator).squeeze(-1)
+        try:
+            picks = torch.multinomial(log_p.exp(), 1,
+                                      generator=generator).squeeze(-1)
+        except RuntimeError as e:
+            # all-(-inf) row => nan probs. Cannot happen for a 2D polygon
+            # (any partial set of disjoint unimodular triangles extends to
+            # a fine triangulation), so reaching this means bad inputs
+            raise RuntimeError(
+                "ar_rollout_batch: a rollout has no legal next simp; "
+                "check that `compat` came from DualGraph.simp_compat"
+            ) from e
         if track_log_probs:
             log_probs_sum += log_p.gather(1, picks.unsqueeze(-1)).squeeze(-1)
         placed.scatter_(1, picks.unsqueeze(-1), True)
+        # placing simp `p` only removes simps incompatible with `p`, so the
+        # legal mask updates incrementally (compat's False diagonal also
+        # removes `p` itself). Equal to compute_legal(placed, compat) but
+        # O(batch * Nsimps) instead of a (batch, Nsimps^2) matmul per step
+        legal &= compat[picks]
 
     return placed, log_probs_sum

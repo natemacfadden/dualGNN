@@ -120,7 +120,6 @@ def bootstrap_fts(
               f"({Nval} val, {len(simps) - Nval} train) via {method} "
               f"-> {parquet_path}")
 
-    # return
     return simps, split
 
 # harvest backends
@@ -140,6 +139,9 @@ def harvest_full(pts_input: np.ndarray) -> np.ndarray:
         `(Nft, N_simps_per_ft, 3)` int8. Simp point indices remapped to the
         input `pts_input` ordering (CYTools reorders points).
     """
+    if len(pts_input) > 127:
+        raise ValueError(f"harvest_full: Npts={len(pts_input)} exceeds the "
+                         f"int8 point-index encoding (max 127)")
     poly = Polytope(pts_input)
     pts  = np.asarray(poly.points(), dtype=np.int64)
 
@@ -160,7 +162,6 @@ def harvest_full(pts_input: np.ndarray) -> np.ndarray:
         arr = pts_to_input[arr]      # remap to our pts ordering
         simps_list.append(canonical_simps(arr))
 
-    # return
     if not simps_list:
         return np.empty((0, 0, 3), dtype=np.int8)
     return np.stack(simps_list)
@@ -195,6 +196,9 @@ def harvest_grow2d(
     simps : ndarray
         `(Nft, N_simps_per_ft, 3)` int8. Each row is a canonicalized FT.
     """
+    if len(pts) > 127:
+        raise ValueError(f"harvest_grow2d: Npts={len(pts)} exceeds the "
+                         f"int8 point-index encoding (max 127)")
     rng = np.random.default_rng(seed)
 
     # generate the triangulations
@@ -225,7 +229,6 @@ def harvest_grow2d(
     print(f"  grow2d: seen={len(seen):>6}/{N_target}  "
           f"attempts={attempts}", flush=True)
 
-    # return
     if not seen:
         return np.empty((0, 0, 3), dtype=np.int8)
     return np.stack(list(seen.values()))

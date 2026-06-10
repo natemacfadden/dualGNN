@@ -166,7 +166,6 @@ def _candidate_simps(pts: np.ndarray) -> np.ndarray:
     N_cands     = 0
 
     # build the output
-    # (do so in a dumb way... iterate over all simplices and reject bad ones)
     for i in range(Npts):
         x0 = pts[i, 0]; y0 = pts[i, 1]
 

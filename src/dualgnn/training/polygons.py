@@ -133,7 +133,7 @@ def write_random_polygons(
         if key in seen:
             continue
 
-        # save it!
+        # accept
         seen.add(key)
         buckets[Npts].append(pts)
         found += 1

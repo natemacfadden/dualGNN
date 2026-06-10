@@ -54,6 +54,7 @@ def sample_ntfes(
     beta:           float      = 1.0,
     seed:           int | None = None,
     n_workers:      int        = 1,
+    max_tries:      int | None = None,
     verbose:        bool       = True,
 ):
     """
@@ -88,6 +89,9 @@ def sample_ntfes(
     n_workers : int, optional
         Worker processes. Default `1` (serial). Pass `-1` to use as many
         as `os.cpu_count()`, capped at `N`.
+    max_tries : int, optional
+        Raise `RuntimeError` after this many extension attempts (per
+        worker, in the parallel path). Default `None` (no cap).
     verbose : bool, optional
         Print progress. Default `True`.
 
@@ -113,12 +117,16 @@ def sample_ntfes(
     if n_workers <= 1:
         return _sample(ctx,
                        N=N, as_triangs=as_triangs,
-                       seed=seed, verbose=verbose)
+                       seed=seed, max_tries=max_tries, verbose=verbose)
 
     # parallel
-    # spawn workers and split sampling across them
+    # spawn workers and split sampling across them. seed=None must stay
+    # nondeterministic (as in the serial path), so draw a random base seed
     per_worker = (N + n_workers - 1) // n_workers
-    base_seed  = 0 if seed is None else seed
+    if seed is None:
+        base_seed = int(np.random.default_rng().integers(2**31 - 1))
+    else:
+        base_seed = seed
     if verbose:
         print(f"[ntfe] spawning {n_workers} parallel workers x {per_worker} "
               f"(target {N}, as_triangs={as_triangs})", flush=True)
@@ -131,7 +139,8 @@ def sample_ntfes(
         futures = [
             ex.submit(_sample, ctx,
                       N=per_worker, as_triangs=as_triangs,
-                      seed=base_seed + 1 + a, verbose=False)
+                      seed=base_seed + 1 + a, max_tries=max_tries,
+                      verbose=False)
             for a in range(n_workers)
         ]
         chunks = [f.result() for f in futures]
@@ -218,6 +227,7 @@ def _sample(
     N:          int,
     as_triangs: bool       = False,
     seed:       int | None = None,
+    max_tries:  int | None = None,
     verbose:    bool       = True,
 ):
     """Sample candidate 2-face FRTs until `N` extend to NTFEs."""
@@ -233,6 +243,10 @@ def _sample(
     t_start    = time.perf_counter()
     t_last_log = t_start
     while n_ok < N:
+        if max_tries is not None and n_try >= max_tries:
+            raise RuntimeError(
+                f"sample_ntfes: only {n_ok}/{N} extended after "
+                f"{n_try} attempts (max_tries={max_tries})")
         n_try  += 1
         triangs = []
         for shape_key, src_to_label, face_poly in zip(
@@ -251,18 +265,20 @@ def _sample(
         cone = cone_of_permissible_heights(
             triangs, npts=ctx.npts, poly=ctx.poly)
         h    = cone.find_interior_point()
-        if h is None:
-            continue
-        h_arr         = np.asarray(h, dtype=np.float64)
-        heights[n_ok] = h_arr
-        if as_triangs:
-            ntfes.append(ctx.poly.triangulate(
-                heights=h_arr, make_star=True))
-        n_ok += 1
+        if h is not None:
+            h_arr         = np.asarray(h, dtype=np.float64)
+            heights[n_ok] = h_arr
+            if as_triangs:
+                ntfes.append(ctx.poly.triangulate(
+                    heights=h_arr, make_star=True))
+            n_ok += 1
 
+        # log on milestones and every >5s of wall time, including dry
+        # stretches with no accepted extension yet
         if verbose:
-            now = time.perf_counter()
-            if now - t_last_log > 5 or n_ok in (1, 10, 100, 1000):
+            now       = time.perf_counter()
+            milestone = h is not None and n_ok in (1, 10, 100, 1000)
+            if now - t_last_log > 5 or milestone:
                 t_last_log = now
                 dt     = now - t_start
                 rate   = n_ok / max(dt, 1e-9)

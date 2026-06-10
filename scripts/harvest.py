@@ -28,7 +28,7 @@ from pathlib import Path
 from dualgnn.training.harvest import (
     MAX_NPTS_FULL_ENUM, GROW2D_TARGET, bootstrap_fts,
 )
-from dualgnn.training.io      import fts_path, load_polygons
+from dualgnn.training.io      import fts_path, load_polygon
 from dualgnn.training.hparams import VAL_FRAC
 
 
@@ -47,7 +47,7 @@ if __name__ == "__main__":
     args = p.parse_args()
 
     # harvest FRTs
-    pts, role    = load_polygons(args.polygons_parquet, id=args.poly_id)
+    pts, role    = load_polygon(args.polygons_parquet, args.poly_id)
     parquet_path = fts_path(args.poly_id, args.fts_dir)
     print(f"[harvest] poly_id={args.poly_id}  n_pts={len(pts)}  role={role}  "
           f"out={parquet_path}")

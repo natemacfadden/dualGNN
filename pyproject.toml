@@ -4,8 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dualgnn"
-version = "0.0.3"
+version = "0.0.4"
 description = "Dual-graph GNN sampler for fine regular triangulations of 2D lattice polygons"
+readme = "README.md"
 authors = [{ name = "Nate MacFadden" }]
 license = "GPL-3.0-or-later"
 requires-python = ">=3.10"

@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import warnings
 
 import numba
 import numpy as np
@@ -79,15 +80,9 @@ class DualGraph:
         pts : ndarray
             `(Npts, 2)` int. Lattice points of the polygon. Includes interior.
         """
-        if pts is None:
-            raise ValueError(
-                "DualGraph(pts) got pts=None. This usually means an upstream "
-                "call to `enum_lattice_pts` saw a degenerate polygon "
-                "(collinear vertices, <3 unique points, or <3 lattice points "
-                "inside the hull)."
-            )
+        _validate_pts(pts)
         self.pts            = np.ascontiguousarray(pts, dtype=np.int64)
-        self.simps          = _candidate_simps(pts)
+        self.simps          = _candidate_simps(self.pts)
         self.simp_compat    = _simp_compat(self.pts, self.simps)
         self.N_simps_per_ft = _N_simps_per_ft(self.pts)
 
@@ -123,6 +118,68 @@ class DualGraph:
 
 # helpers
 # =======
+# input validation
+def _validate_pts(pts) -> None:
+    """
+    Validate the `DualGraph(pts)` input contract: an `(Npts, 2)` integer
+    array holding ALL lattice points of a 2D convex polygon (vertices,
+    boundary, and interior), with no duplicates. Raises `ValueError` with
+    a specific message on each violation; silent acceptance of any of
+    them would corrupt the fineness/dedup guarantees downstream.
+    """
+    if pts is None:
+        raise ValueError(
+            "DualGraph(pts) got pts=None. This usually means an upstream "
+            "call to `enum_lattice_pts` saw a degenerate polygon "
+            "(collinear vertices, <3 unique points, or <3 lattice points "
+            "inside the hull)."
+        )
+    arr = np.asarray(pts)
+    if arr.ndim != 2 or arr.shape[1] != 2:
+        raise ValueError(
+            f"DualGraph(pts) expects shape (Npts, 2); got {arr.shape}."
+        )
+    if not np.issubdtype(arr.dtype, np.integer):
+        if not (np.issubdtype(arr.dtype, np.floating)
+                and np.all(arr == np.floor(arr))):
+            raise ValueError(
+                f"DualGraph(pts) expects integer lattice points; got dtype "
+                f"{arr.dtype} with non-integral values."
+            )
+        arr = arr.astype(np.int64)
+    if len(arr) < 3:
+        raise ValueError(
+            f"DualGraph(pts) needs >= 3 lattice points to triangulate; "
+            f"got {len(arr)}."
+        )
+    if len(np.unique(arr, axis=0)) != len(arr):
+        raise ValueError(
+            "DualGraph(pts) got duplicate rows in pts; every lattice point "
+            "must appear exactly once."
+        )
+
+    # 2D check (before ConvexHull, which raises an opaque QhullError)
+    if np.linalg.matrix_rank(arr - arr[0]) < 2:
+        raise ValueError(
+            "DualGraph(pts) got collinear points; the polygon must be "
+            "2-dimensional."
+        )
+
+    # all-lattice-points check: catches the common mistake of passing only
+    # the polygon's vertices. Local import (geometry imports regfans)
+    from .geometry import enum_lattice_pts
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        full = enum_lattice_pts(arr)
+    if full is not None and len(full) != len(arr):
+        raise ValueError(
+            f"DualGraph(pts) expects ALL lattice points of the polygon "
+            f"(vertices, boundary, and interior): got {len(arr)} points "
+            f"but conv(pts) contains {len(full)}. Build the input with "
+            f"dualgnn.geometry.enum_lattice_pts(vertices)."
+        )
+
+
 # construct various class parameters
 def _N_simps_per_ft(pts: np.ndarray) -> int:
     """

@@ -118,7 +118,7 @@ net = DualGNN.default()                  # or DualGNN.from_ckpt(path)
 fts = sample(net, DualGraph(pts), Ntriangs=8)          # (8, 32, 3) int8
 ```
 
-**Stable contract** (downstream consumers, e.g. CYTools, rely on this):
+**Stable contract** (downstream consumers, e.g. CYTools, assume this):
 `pts` is the polygon's full lattice-point set as an `(Npts, 2)` int array,
 and returned simplices index into `pts` in the caller's row order. Every
 sample is a fine triangulation of the full point set, returned in canonical

@@ -71,6 +71,10 @@ $h^{1,1}=86$; $204$ vs $22$ at $h^{1,1}=128$), a tradeoff for its uniformity.
 
 ![CY flop-distance histograms](figures/fig20_cy_flop_distance.png)
 
+**Benchmark your own sampler against these results:** the paper's 20
+held-out polygons (with exact FRT counts) and the uniformity-scoring
+protocol ship in [`eval/`](eval/).
+
 ## Install
 
 Recommended
@@ -213,5 +217,7 @@ src/dualgnn/          library code (DualGraph, DualGNN, sampler, training)
 src/dualgnn/ckpts/    shipped checkpoints, packaged as data (D32K16 SFT,
                       D32K16 + REINFORCE = DualGNN.default())
 scripts/              CLI entry points (train, reinforce, harvest, make_polygons, visualize)
+eval/                 benchmark polygons + uniformity-scoring protocol
 tutorials/             inference, NTFE demos
+hf/                   Hugging Face model card
 ```

@@ -26,12 +26,66 @@ from importlib import resources
 from pathlib import Path
 import pickle
 
+import numba
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 # local imports
 from .device import default_device
+
+
+# CPU kernel
+# ==========
+@numba.njit(parallel=True, cache=True)
+def _gather_reduce_cpu(f_norm, src_sorted, seg_offsets,
+                       out_sum, out_min, out_max):
+    """
+    Fused message aggregation for the node-major CPU inference path: for
+    each node, read its incoming senders' rows once and accumulate sum /
+    min / max in a single pass, instead of materializing the (Nedges,
+    batch, D) gathered tensor and reducing it three times. Nodes are
+    independent, so the outer loop threads with disjoint writes.
+
+    All arrays are numpy views of torch tensors (zero-copy). `out_*` may
+    be strided slices of one buffer; rows of nodes with no incoming edges
+    are left untouched (callers pre-zero them).
+
+    Parameters
+    ----------
+    f_norm : ndarray
+        `(Nsimps, batch, D)` float32. Normalized hidden state.
+    src_sorted : ndarray
+        `(Nedges,)` int64. Sender node per dst-sorted edge.
+    seg_offsets : ndarray
+        `(Nsimps + 1,)` int64. Node `n`'s incoming edges are
+        `src_sorted[seg_offsets[n]:seg_offsets[n + 1]]`.
+    out_sum, out_min, out_max : ndarray
+        `(Nsimps, batch, D)` float32. Written in place.
+    """
+    Nsimps, batch, D = f_norm.shape
+    for n in numba.prange(Nsimps):
+        s0, s1 = seg_offsets[n], seg_offsets[n + 1]
+        if s0 == s1:
+            continue
+        r = f_norm[src_sorted[s0]]
+        for b in range(batch):
+            for d in range(D):
+                v = r[b, d]
+                out_sum[n, b, d] = v
+                out_min[n, b, d] = v
+                out_max[n, b, d] = v
+        for e in range(s0 + 1, s1):
+            r = f_norm[src_sorted[e]]
+            for b in range(batch):
+                for d in range(D):
+                    v = r[b, d]
+                    out_sum[n, b, d] += v
+                    if v < out_min[n, b, d]:
+                        out_min[n, b, d] = v
+                    if v > out_max[n, b, d]:
+                        out_max[n, b, d] = v
 
 
 # main model class
@@ -65,11 +119,12 @@ class _Layer(nn.Module):
           over dst-sorted edges (contiguous segments, no atomics); under
           grad they keep the original `scatter_reduce`
         - on CPU inference the whole forward runs in `(Nsimps, batch, D)`
-          layout (see `transposed` below): a dim-0 scatter of an
-          `(E, batch * D)` view hits torch's fast contiguous-2D CPU path
-          (vectorized row streaming, ~19x per-core over the generic
-          strided dim-1 path; measured single-thread 631 -> 34 ms on the
-          [0,6]^2 trio, with threading a minor factor on the fast form)
+          layout (see `transposed` below) and aggregates via a fused
+          numba kernel (`_gather_reduce_cpu`): one pass over the
+          dst-sorted edges accumulates sum/min/max per node and writes
+          straight into the mlp input buffer, so neither the gathered
+          `(Nedges, batch, D)` intermediate nor the wide concat is ever
+          materialized (~4x over the torch gather + 3-scatter form)
         - `mlp[0]` is applied blockwise (one weight slice per input block),
           so the wide `(f, agg, metadata)` concat is never materialized
 
@@ -98,7 +153,8 @@ class _Layer(nn.Module):
             nn.Linear(D, D),
         )
 
-    def forward(self, f, circ_agg, routing, metadata, *, transposed=False):
+    def forward(self, f, circ_agg, routing, metadata, *, transposed=False,
+                const=None, w_cat=None):
         """
         Apply one message-passing layer.
 
@@ -125,39 +181,40 @@ class _Layer(nn.Module):
         transposed : bool, optional
             Node-major layout (set by `DualGNN.forward` for CPU inference;
             see the class docstring). Default False.
+        const, w_cat : Tensor, optional
+            Graph-static folded terms from `_fold_static`, cached across a
+            rollout's forwards by `DualGNN.forward`. Default `None`
+            (recompute; the grad-mode path). `const` must match `f`'s
+            layout: `(1, Nsimps, D)`, or `(Nsimps, 1, D)` if `transposed`.
 
         Returns
         -------
         f_new : Tensor
             Updated hidden state, same shape/layout as `f`.
         """
-        src_sorted, dst_sorted, seg_lengths, isolated = routing
+        src_sorted, dst_sorted, seg_lengths, seg_offsets, isolated = routing
         Nedges = src_sorted.shape[0]
 
         # aggregate each node's incoming messages: per-edge sender features,
         # reduced per node. Nodes with no incoming edges get 0
         f_norm = self.norm(f)
         if transposed:
-            # CPU inference, node-major: dim-0 gather + dim-0 scatters of an
-            # (Nedges, batch * D) view, which hits the fast contiguous-2D
-            # scatter path (the batch-major dim-1 scatter takes the generic
-            # strided path, ~19x slower per core)
+            # CPU inference, node-major: the fused numba kernel reads each
+            # sender row once and accumulates all three reductions in one
+            # pass, writing straight into the mlp input buffer -- no
+            # (Nedges, batch, D) gathered intermediate, no concat
             Nsimps, batch_size, D = f.shape
-            f_sender = f_norm[src_sorted].view(Nedges, batch_size * D)
-            idx   = dst_sorted.view(Nedges, 1).expand(Nedges, batch_size * D)
-            f_sum = torch.zeros(Nsimps, batch_size * D,
-                                device=f.device, dtype=f_sender.dtype)
-            f_min = torch.zeros_like(f_sum)
-            f_max = torch.zeros_like(f_sum)
-            f_sum.scatter_reduce_(0, idx, f_sender, reduce="sum",
-                                  include_self=False)
-            f_min.scatter_reduce_(0, idx, f_sender, reduce="amin",
-                                  include_self=False)
-            f_max.scatter_reduce_(0, idx, f_sender, reduce="amax",
-                                  include_self=False)
-            f_sum = f_sum.view(Nsimps, batch_size, D)
-            f_min = f_min.view(Nsimps, batch_size, D)
-            f_max = f_max.view(Nsimps, batch_size, D)
+            if isolated is None:           # kernel writes every node
+                h_in = torch.empty(Nsimps, batch_size, 4 * D, dtype=f.dtype)
+            else:                          # untouched rows must read as 0
+                h_in = torch.zeros(Nsimps, batch_size, 4 * D, dtype=f.dtype)
+            h_in[:, :, :D] = f_norm
+            _gather_reduce_cpu(
+                f_norm.numpy(), src_sorted.numpy(), seg_offsets.numpy(),
+                h_in[:, :, D:2 * D].numpy(),
+                h_in[:, :, 2 * D:3 * D].numpy(),
+                h_in[:, :, 3 * D:].numpy(),
+            )
         elif torch.is_grad_enabled() or f.device.type != "cuda":
             # scatter_reduce under grad: its backward distributes min/max
             # gradients across ties exactly as before (ties are common --
@@ -199,7 +256,38 @@ class _Layer(nn.Module):
         #   [f | circ_sum, f_sum | circ_min, f_min | circ_max, f_max | meta]
         # so slicing them lets the batch-independent circ blocks fold into a
         # single bias-like term, and spares materializing the wide concat
-        De = self.Dedge
+        if not transposed:
+            h_in = torch.cat([f_norm, f_sum, f_min, f_max], dim=-1)
+        if const is None:                # uncached (grad-mode) call
+            const, w_cat, w_meta = self._fold_static(circ_agg)
+        else:
+            w_meta = self.mlp[0].weight[:, -self.Dmetadata:]
+        h = (F.linear(h_in, w_cat) + F.linear(metadata, w_meta) + const)
+        return f + self.mlp[2](self.mlp[1](h))
+
+    def _fold_static(self, circ_agg):
+        """
+        Fold the layer's graph-static mlp[0] inputs into reusable tensors:
+        the circ blocks of `agg` never change for a polygon, so their
+        contribution collapses into a bias-like `const`. `DualGNN.forward`
+        caches the result across the rollout's many forwards.
+
+        Parameters
+        ----------
+        circ_agg : Tensor
+            `(1, Nsimps, 3 * Dedge)` float (`DualGNN._aggregate_circ`).
+
+        Returns
+        -------
+        const : Tensor
+            `(1, Nsimps, D)` float. `W_circ @ circ_agg + bias`.
+        w_cat : Tensor
+            `(D, 4 * D)` float. mlp[0] weight columns for
+            `(f, f_sum, f_min, f_max)`, concatenated.
+        w_meta : Tensor
+            `(D, Dmetadata)` float. mlp[0] weight columns for `metadata`.
+        """
+        D, De = self.D, self.Dedge
         Wf, Wcs, Ws, Wcm, Wm, Wcx, Wx, Wmeta = torch.split(
             self.mlp[0].weight,
             [D, De, D, De, D, De, D, self.Dmetadata], dim=1,
@@ -207,10 +295,7 @@ class _Layer(nn.Module):
         cs, cm, cx = circ_agg.split(De, dim=-1)
         const = (F.linear(cs, Wcs) + F.linear(cm, Wcm) + F.linear(cx, Wcx)
                  + self.mlp[0].bias)
-        h = (F.linear(torch.cat([f_norm, f_sum, f_min, f_max], dim=-1),
-                      torch.cat([Wf, Ws, Wm, Wx], dim=1))
-             + F.linear(metadata, Wmeta) + const)
-        return f + self.mlp[2](self.mlp[1](h))
+        return const, torch.cat([Wf, Ws, Wm, Wx], dim=1), Wmeta
 
 class DualGNN(nn.Module):
     """
@@ -253,6 +338,9 @@ class DualGNN(nn.Module):
         )
         self.norm = nn.LayerNorm(D)
         self.head = nn.Linear(D, 1)
+
+        # per-graph constants memo for AR rollouts (see forward)
+        self._fwd_cache: dict | None = None
 
     # default() cache, keyed by str(device)
     _default_nets: dict[str, "DualGNN"] = {}
@@ -345,6 +433,10 @@ class DualGNN(nn.Module):
             `(Nedges,)` long.
         seg_lengths : Tensor
             `(Nsimps,)` long.
+        seg_offsets : Tensor
+            `(Nsimps + 1,)` long. Cumulative form of `seg_lengths`: node
+            `n`'s incoming edges sit at `[seg_offsets[n], seg_offsets[n+1])`
+            of the sorted edge arrays.
         isolated : Tensor or None
             `(Nsimps, 1)` bool, or `None`.
         """
@@ -352,8 +444,11 @@ class DualGNN(nn.Module):
         src_sorted  = edge_indices[0][order]
         dst_sorted  = edge_indices[1][order]
         seg_lengths = torch.bincount(edge_indices[1], minlength=Nsimps)
+        seg_offsets = torch.zeros(Nsimps + 1, dtype=torch.int64,
+                                  device=edge_indices.device)
+        torch.cumsum(seg_lengths, 0, out=seg_offsets[1:])
         isolated    = (seg_lengths == 0).view(Nsimps, 1)
-        return (src_sorted, dst_sorted, seg_lengths,
+        return (src_sorted, dst_sorted, seg_lengths, seg_offsets,
                 isolated if isolated.any() else None)
 
     def _aggregate_circ(self, circ_features, edge_indices, *, Nsimps):
@@ -410,24 +505,58 @@ class DualGNN(nn.Module):
             placed.float().unsqueeze(-1),
             legal.float().unsqueeze(-1),
         ], dim=-1)
-        circ_agg = self._aggregate_circ(circ_features, edge_indices,
-                                        Nsimps=placed.shape[-1])
-        routing  = self._routing(edge_indices, Nsimps=placed.shape[-1])
+
+        # graph-static work (routing sort, circ aggregation, per-layer
+        # folded constants) is identical for every step of an AR rollout,
+        # which calls forward dozens of times with the SAME graph tensors.
+        # Memoize one graph's worth, keyed on tensor identity + the mlp[0]
+        # weight/bias versions (so an optimizer step invalidates it).
+        # Grad-mode calls bypass the cache entirely.
+        Nsimps    = placed.shape[-1]
+        use_cache = not torch.is_grad_enabled()
+        wver = tuple(v for l in self.layers
+                     for v in (l.mlp[0].weight._version,
+                               l.mlp[0].bias._version))
+        cache = self._fwd_cache
+        if (use_cache and cache is not None
+                and cache["cf"] is circ_features
+                and cache["ei"] is edge_indices
+                and cache["wver"] == wver):
+            circ_agg, routing = cache["circ_agg"], cache["routing"]
+            consts, w_cats    = cache["consts"], cache["w_cats"]
+        else:
+            circ_agg = self._aggregate_circ(circ_features, edge_indices,
+                                            Nsimps=Nsimps)
+            routing  = self._routing(edge_indices, Nsimps=Nsimps)
+            if use_cache:
+                folded = [l._fold_static(circ_agg)[:2] for l in self.layers]
+                consts = [c for c, _ in folded]
+                w_cats = [w for _, w in folded]
+                self._fwd_cache = {
+                    "cf": circ_features, "ei": edge_indices, "wver": wver,
+                    "circ_agg": circ_agg, "routing": routing,
+                    "consts": consts, "w_cats": w_cats,
+                }
+            else:
+                consts = w_cats = [None] * len(self.layers)
 
         # CPU inference runs node-major (Nsimps, batch, D): every per-node
-        # op acts on the last dim either way, and the layers' scatters
-        # parallelize in this layout (see the _Layer docstring)
+        # op acts on the last dim either way, and the layers' aggregation
+        # is faster in this layout (see the _Layer docstring)
         transposed = (placed.device.type != "cuda"
                       and not torch.is_grad_enabled())
         if transposed:
             metadata = metadata.transpose(0, 1).contiguous()
             circ_agg = circ_agg.transpose(0, 1)
+            consts   = [c.transpose(0, 1) if c is not None else None
+                        for c in consts]
 
         f = self.init_mlp(metadata)
 
         # K message-passing rounds
-        for layer in self.layers:
-            f = layer(f, circ_agg, routing, metadata, transposed=transposed)
+        for layer, const, w_cat in zip(self.layers, consts, w_cats):
+            f = layer(f, circ_agg, routing, metadata,
+                      transposed=transposed, const=const, w_cat=w_cat)
 
         # project to logits
         f      = self.norm(f)

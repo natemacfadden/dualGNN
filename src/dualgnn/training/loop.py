@@ -222,10 +222,10 @@ class Trainer:
         while self.step < self.cfg.n_steps:
             result = self._train_step()
             if result is not None:
-                st, pid, loss_item = result
+                pid, loss_item = result
                 if (self.step % self.cfg.eval_every == 0
                         or self.step == self.cfg.n_steps - 1):
-                    self._eval_pass(st, pid, loss_item)
+                    self._eval_pass(pid, loss_item)
                 if (self.cfg.explore_every > 0 and self.step > 0
                         and self.step % self.cfg.explore_every == 0):
                     self._explore_round()
@@ -256,9 +256,9 @@ class Trainer:
         Returns
         -------
         result : tuple or None
-            `(st, pid, loss_item)` where `st` is the `PolyState`, `pid` is
-            its polygon id, and `loss_item` is the train loss for the step.
-            `None` if the batch could not be sampled (e.g. empty FRT pool).
+            `(pid, loss_item)`: the trained polygon's id and the step's
+            train loss. `None` if the batch could not be sampled (e.g.
+            empty FRT pool).
         """
         cur_lr = lr_schedule(self.step, warmup=self.cfg.warmup_steps,
                              total=self.cfg.n_steps, base_lr=self.cfg.lr)
@@ -314,10 +314,10 @@ class Trainer:
             w.add_scalar("train/grad_norm", float(grad_norm),       s)
             w.add_scalar("train/k_min",     cur_k_min,              s)
             w.add_scalar("train/poly_id",   pid,                    s)
-        return st, pid, loss_item
+        return pid, loss_item
 
     @torch.no_grad()
-    def _eval_pass(self, train_st, train_pid, train_loss):
+    def _eval_pass(self, train_pid, train_loss):
         """One validation pass on a randomly-picked polygon. Skips silently
         if the eval polygon fails to load or its val batch is empty."""
         self.net.eval()

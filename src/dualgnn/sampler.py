@@ -307,7 +307,7 @@ def ar_rollout_batch(
         torch.zeros(batch, device=device) if track_log_probs else None
     )
 
-    for step in range(N_simps_per_ft):
+    for _ in range(N_simps_per_ft):
         logits = net(circ_features, edge_indices, placed, legal) * beta
         logits = logits.masked_fill(~legal, float("-inf"))
         log_p  = F.log_softmax(logits, dim=-1)

@@ -10,6 +10,10 @@ tags:
 - string-theory
 ---
 
+<!-- This file is the source of the Hugging Face model card.
+     Publish updates with:
+     hf upload natemacfadden/dualGNN docs/hf_model_card.md README.md -->
+
 # dualGNN
 
 dualGNN is an autoregressive message-passing GNN for sampling fine, regular

@@ -16,8 +16,9 @@ dist/
 src/dualgnn/reference_samplers/_grow2d/grow2d.c
 src/dualgnn/reference_samplers/_pushing/pushing.c
 
-# pytest / coverage
+# pytest / coverage / lint
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 

@@ -1,7 +1,7 @@
 # dualGNN
 *[Nate MacFadden](https://github.com/natemacfadden), Liam McAllister Group, Cornell*
 
-**Paper:** [Sampling Triangulations and Calabi-Yau Threefolds with Autoregressive GNNs](https://arxiv.org/abs/2605.27770) (arXiv:2605.27770; [PDF in this repo](https://github.com/natemacfadden/dualGNN/blob/main/paper.pdf))
+**Paper:** [Sampling Triangulations and Calabi-Yau Threefolds with Autoregressive GNNs](https://arxiv.org/abs/2605.27770) (arXiv:2605.27770; [PDF in this repo](https://github.com/natemacfadden/dualGNN/blob/main/docs/paper.pdf))
 
 [![PyPI](https://img.shields.io/pypi/v/dualgnn)](https://pypi.org/project/dualgnn/)
 [![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.20622920.svg)](https://doi.org/10.5281/zenodo.20622920)
@@ -42,9 +42,9 @@ For string theory applications, it generates uniform samples (when paired with m
 
 ## Results
 
-The figures below are taken **from [the paper](https://github.com/natemacfadden/dualGNN/blob/main/paper.pdf)** (included in this repo) and are
+The figures below are taken **from [the paper](https://github.com/natemacfadden/dualGNN/blob/main/docs/paper.pdf)** (included in this repo) and are
 **not directly reproducible from the code here**; the repo ships inference and a small
-uniformity demo (`uniformity/`), not the full training and evaluation pipeline. See the
+uniformity demo (`eval/uniformity/`), not the full training and evaluation pipeline. See the
 paper for methodology, hardware, and sample counts.
 
 **Zero-shot to a much larger polygon.** The model, trained on the single triangle
@@ -52,27 +52,27 @@ $\mathrm{conv}\{(0,0),(0,4),(6,0)\}$ ($405{,}706$ FRTs) and applied zero-shot to
 ($735{,}430{,}548$ FRTs), reaches the uniform ($1/N$) floor and is faster than `flip_walk`,
 the only other sampler that reaches it; `pushing`/`grow2d`/`fast` are quicker but biased.
 
-![KL vs sample time, zero-shot on [0,4]^2](https://raw.githubusercontent.com/natemacfadden/dualGNN/main/figures/fig10_zeroshot_pareto.png)
+![KL vs sample time, zero-shot on [0,4]^2](https://raw.githubusercontent.com/natemacfadden/dualGNN/main/docs/figures/fig10_zeroshot_pareto.png)
 
 **Most uniform across many polygons.** Over $200{,}000$ samples on $20$ held-out polygons
 ($11 \le N_\mathrm{pts} \le 18$), dualGNN is the most uniform sampler tested at every size,
 tying `flip_walk` only at $N_\mathrm{pts}=18$ while being $\sim4\times$ faster.
 
-![multi-polygon uniformity](https://raw.githubusercontent.com/natemacfadden/dualGNN/main/figures/fig13_multipoly_uniformity.png)
+![multi-polygon uniformity](https://raw.githubusercontent.com/natemacfadden/dualGNN/main/docs/figures/fig13_multipoly_uniformity.png)
 
 **No sample autocorrelation.** A good sampler's draws should be as far apart as independent
 uniform draws. Plotting the flip distance between samples $k$ apart, normalized against that
 uniform baseline, dualGNN matches uniform ($0$) at every lag while `flip_walk`'s nearby
 samples are correlated (closer together) until about $k=20$.
 
-![multi-polygon autocorrelation](https://raw.githubusercontent.com/natemacfadden/dualGNN/main/figures/fig14_multipoly_autocorrelation.png)
+![multi-polygon autocorrelation](https://raw.githubusercontent.com/natemacfadden/dualGNN/main/docs/figures/fig14_multipoly_autocorrelation.png)
 
 **Downstream: more diverse Calabi-Yau samples.** Combined into Calabi-Yau threefolds via the
 [NTFE algorithm](https://arxiv.org/abs/2309.10855), dualGNN's samples span far wider flop
 distances than the de facto `random_triangulations_fast` ($130$ vs $46$ mean flops at
 $h^{1,1}=86$; $204$ vs $22$ at $h^{1,1}=128$), a tradeoff for its uniformity.
 
-![CY flop-distance histograms](https://raw.githubusercontent.com/natemacfadden/dualGNN/main/figures/fig20_cy_flop_distance.png)
+![CY flop-distance histograms](https://raw.githubusercontent.com/natemacfadden/dualGNN/main/docs/figures/fig20_cy_flop_distance.png)
 
 **Benchmark your own sampler against these results:** the paper's 20
 held-out polygons (with exact FRT counts) and the uniformity-scoring
@@ -230,7 +230,8 @@ src/dualgnn/          library code (DualGraph, DualGNN, sampler, training)
 src/dualgnn/ckpts/    shipped checkpoints, packaged as data (D32K16 SFT,
                       D32K16 + REINFORCE = DualGNN.default())
 scripts/              CLI entry points (train, reinforce, harvest, make_polygons, visualize)
-eval/                 benchmark polygons + uniformity-scoring protocol
-tutorials/             inference, NTFE demos
-hf/                   Hugging Face model card
+tests/                pytest suite (pip surface; NTFE tests need the conda env)
+tutorials/            inference, NTFE demos (Colab-ready)
+eval/                 benchmark polygons, uniformity-scoring protocol, demo
+docs/                 paper, figures, GUI demo gif, Hugging Face model card
 ```

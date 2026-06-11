@@ -11,8 +11,8 @@ here.
   - `fig11_00` ... `fig11_19`: the paper's 20 held-out (OOD) polygons,
     $11 \le N_\mathrm{pts} \le 18$, each with its exact FRT count `n_frt`
     and dualGNN's reference irregular-rate at 50k draws.
-  - `4x6tri`, `4x4sq`: the enumerable demo polygons from `uniformity/`
-    (405,706 and 735,430,548 FRTs).
+  - `4x6tri`, `4x4sq`: the enumerable demo polygons from this folder's
+    `uniformity/` (405,706 and 735,430,548 FRTs).
 - **`evaluate.py`** -- the scoring protocol (library + CLI).
 
 ## The protocol
@@ -68,4 +68,4 @@ The paper's flip-distance autocorrelation diagnostic (fig. 14) needs a
 flip-graph implementation and is not bundled; see the paper for that
 methodology. For a richer runnable demo (rank-frequency plots,
 KL-vs-time against the bundled `grow2d`/`pushing` baselines), see
-[`uniformity/`](../uniformity).
+[`uniformity/`](uniformity/).

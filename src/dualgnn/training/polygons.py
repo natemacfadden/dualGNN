@@ -55,7 +55,7 @@ def write_random_polygons(
     out:               Path  = Path("polygons.parquet"),
     verbose:           bool  = True,
     force:             bool  = False,
-):
+) -> None:
     """
     Generate `polygons.parquet` with `Npolys_per_bucket` polygons per `Npts`
     bucket in `[Npts_min, Npts_max]`, assigning each a "train" or "val" role.

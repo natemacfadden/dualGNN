@@ -56,7 +56,7 @@ def sample_ntfes(
     n_workers:      int        = 1,
     max_tries:      int | None = None,
     verbose:        bool       = True,
-):
+) -> np.ndarray | list:
     """
     Sample NTFEs of `poly` using dualGNN and https://arxiv.org/abs/2309.10855.
 

@@ -52,7 +52,7 @@ class SimpConditional:
         self,
         pool_simps:      np.ndarray,
         dualgraph_simps: np.ndarray,
-    ):
+    ) -> None:
         # (simps_to_bitmaps is separate since we use it elsewhere)
         self.bm = simps_to_bitmaps(pool_simps, dualgraph_simps)
         self._bm_gpu: torch.Tensor | None = None

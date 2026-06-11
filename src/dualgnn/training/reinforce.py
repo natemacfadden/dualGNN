@@ -68,7 +68,7 @@ def reinforce(
     device:         str | None,
     seed:           int,
     invalid_reward: float = -2.0,
-):
+) -> None:
     """
     REINFORCE fine-tune of a dualgnn AR sampler.
 
@@ -225,7 +225,8 @@ def reinforce(
 
 # RL polygon state
 # ================
-def build_rl_poly_state(row, src_run, *, device="cpu") -> PolyState:
+def build_rl_poly_state(row: dict, src_run: Path, *,
+                        device: str = "cpu") -> PolyState:
     """
     Build a `PolyState` for REINFORCE: derive the polygon's `DualGraph`
     from `row["pts"]`, read the canonical-key set of its FRT pool, and
@@ -419,7 +420,8 @@ def _eval_pass(
     if kl_list:
         writer.add_scalar("val/mean_kl", float(np.mean(kl_list)), step)
 
-def kl_per_poly(net, state: PolyState, Ntriangs, device):
+def kl_per_poly(net: DualGNN, state: PolyState, Ntriangs: int,
+                device: str) -> tuple[float, float, int]:
     """
     Per-polygon KL of the AR-sampled distribution vs uniform over the pool.
 

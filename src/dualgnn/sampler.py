@@ -140,9 +140,11 @@ def sample(
     verbose : bool, optional
         Print a warning when `beta != 1.0`. Default True.
     compile_model : bool, optional
-        If True, wrap `net` with `torch.compile(net, dynamic=True)`. ~1.9x
-        speedup on Npts=64 polygons but pays ~10s compile on first call. For
-        repeated calls, compile once externally instead. Default False.
+        If True, wrap `net` with `torch.compile(net, dynamic=True)`. Only
+        worth it for LARGE polygons (~1.2x at Npts=64); on small ones the
+        per-step guard overhead makes it a net LOSS (~0.8x at Npts=19),
+        and the first call pays ~20s of compilation. For repeated calls,
+        compile once externally instead. Default False.
 
     Returns
     -------
@@ -237,28 +239,10 @@ def compute_legal(
         `(batch_size, Nsimps)` bool. `legal[b, i]` True iff `i` is unplaced AND
         pairwise-compatible with every placed simp in row `b`.
     """
-    B, Nsimps = placed.shape
-
-    # fast path: faster for small Nsimps. Crossover ~3k; above that the
-    # chunked path below wins by skipping the (~compat).float() materialization
-    # (and is required to stay under ~2 GB once Nsimps > 22360).
-    if Nsimps <= 3000:
-        placed_f    = placed.float()         # (batch_size, Nsimps)
-        incompat    = (~compat).float()      # (Nsimps, Nsimps)
-        N_conflicts = placed_f @ incompat    # (batch_size, Nsimps): #conflicts
-        return N_conflicts < 0.5 # (0.5 for floating point tolerances)
-
-    # use placed @ (~compat) = |placed| - placed @ compat to skip the
-    # (~compat).float() materialization; stream column chunks for big Nsimps
-    placed_f  = placed.float()
-    n_placed  = placed_f.sum(dim=1, keepdim=True)
-    chunk_len = max(1, 2_000_000_000 // (4 * Nsimps))
-    legal     = torch.empty(B, Nsimps, dtype=torch.bool, device=placed.device)
-    for c0 in range(0, Nsimps, chunk_len):
-        c1 = min(c0 + chunk_len, Nsimps)
-        N_compat = placed_f @ compat[:, c0:c1].float()
-        legal[:, c0:c1] = (n_placed - N_compat) < 0.5
-    return legal
+    placed_f    = placed.float()         # (batch_size, Nsimps)
+    incompat    = (~compat).float()      # (Nsimps, Nsimps)
+    N_conflicts = placed_f @ incompat    # (batch_size, Nsimps): #conflicts
+    return N_conflicts < 0.5 # (0.5 for floating point tolerances)
 
 # AR rollout
 # ==========

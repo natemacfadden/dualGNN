@@ -41,11 +41,14 @@ from .device import default_device
 def _gather_reduce_cpu(f_norm, src_sorted, seg_offsets,
                        out_sum, out_min, out_max):
     """
-    Fused message aggregation for the node-major CPU inference path: for
-    each node, read its incoming senders' rows once and accumulate sum /
-    min / max in a single pass, instead of materializing the (Nedges,
-    batch, D) gathered tensor and reducing it three times. Nodes are
-    independent, so the outer loop threads with disjoint writes.
+    Aggregate messages with ~4x less memory traffic than the torch ops
+    this kernel replaces. Written with torch ops, the aggregation must
+    gather all sender rows into an `(Nedges, batch, D)` tensor (one full
+    write) and reduce it three times (three full reads). This kernel
+    instead stores no copy of any sender row: each value, as it is read,
+    is added to the node's running sum and compared against its running
+    min/max, so the only writes are the final per-node results. Nodes
+    are independent, so the outer loop threads with disjoint writes.
 
     All arrays are numpy views of torch tensors (zero-copy). `out_*` may
     be strided slices of one buffer; rows of nodes with no incoming edges
@@ -109,23 +112,24 @@ class _Layer(nn.Module):
     rather than only at init, so every layer can directly see the current
     placement/legality state.
 
-    Implementation notes (the math matches the description above exactly;
-    the layout below avoids the memory traffic that used to dominate):
-        - messages reduce elementwise, so the circ columns of `agg` are
-          state-independent and computed once per forward by the caller
-          (`DualGNN._aggregate_circ`), not per layer and batch element
-        - on CUDA inference the `f` columns reduce via `segment_reduce`
-          over dst-sorted edges (contiguous segments, no atomics); under
-          grad they keep the original `scatter_reduce`
-        - on CPU inference the whole forward runs in `(Nsimps, batch, D)`
-          layout (see `transposed` below) and aggregates via a fused
-          numba kernel (`_gather_reduce_cpu`): one pass over the
-          dst-sorted edges accumulates sum/min/max per node and writes
-          straight into the mlp input buffer, so neither the gathered
-          `(Nedges, batch, D)` intermediate nor the wide concat is ever
-          materialized (~4x over the torch gather + 3-scatter form)
-        - `mlp[0]` is applied blockwise (one weight slice per input block),
-          so the wide `(f, agg, metadata)` concat is never materialized
+    Implementation notes. The math matches the description above
+    exactly; everything below exists to reduce memory traffic, which
+    dominates this model (the matrices are tiny). Three ideas:
+        - compute once what never changes: the circ part of `agg` and
+          the matching mlp[0] terms are per-polygon constants, hoisted
+          out of the layer entirely (`DualGNN._aggregate_circ`,
+          `_fold_static`)
+        - aggregate over contiguous memory: edges arrive sorted by
+          receiver (`DualGNN._routing`), so on CUDA inference the
+          reduction streams adjacent rows (`segment_reduce`, no
+          atomics), and on CPU inference a fused numba kernel
+          (`_gather_reduce_cpu`) does all three reductions in one pass
+          with no gathered intermediate. CPU also runs the whole
+          forward node-major, `(Nsimps, batch, D)` (`transposed` below)
+        - never build the wide concat: `mlp[0]` is applied blockwise,
+          one weight slice per input block
+    Grad-mode calls skip all of this and use plain `scatter_reduce`, so
+    training gradients (including min/max tie-handling) are unchanged.
 
     Parameters
     ----------
@@ -133,7 +137,7 @@ class _Layer(nn.Module):
         Hidden state dimension.
     """
 
-    def __init__(self, D):
+    def __init__(self, D: int) -> None:
         super().__init__()
 
         # dimensions
@@ -168,10 +172,11 @@ class _Layer(nn.Module):
             (`DualGNN._aggregate_circ`) -- `(Nsimps, 1, 3 * Dedge)` when
             `transposed`.
         routing : tuple
-            `(src_sorted, dst_sorted, seg_lengths, isolated)` from
-            `DualGNN._routing`: sender / receiver simp index per dst-sorted
-            edge `(Nedges,)`, incoming-edge count per node `(Nsimps,)`, and
-            a `(Nsimps, 1)` bool mask of nodes with no incoming edges
+            `(src_sorted, dst_sorted, seg_lengths, seg_offsets, isolated)`
+            from `DualGNN._routing`: sender / receiver simp index per
+            dst-sorted edge `(Nedges,)`, incoming-edge count per node
+            `(Nsimps,)`, its `(Nsimps + 1,)` cumulative form, and a
+            `(Nsimps, 1)` bool mask of nodes with no incoming edges
             (`None` if there are none).
         metadata : Tensor
             `(batch_size, Nsimps, Dmetadata)` float per-node state features
@@ -266,10 +271,11 @@ class _Layer(nn.Module):
 
     def _fold_static(self, circ_agg):
         """
-        Fold the layer's graph-static mlp[0] inputs into reusable tensors:
-        the circ blocks of `agg` never change for a polygon, so their
-        contribution collapses into a bias-like `const`. `DualGNN.forward`
-        caches the result across the rollout's many forwards.
+        Pre-multiply the parts of mlp[0]'s input that never change.
+        `W @ [a; b; c] = Wa @ a + Wb @ b + Wc @ c`, and the circ blocks
+        of the aggregation are fixed per polygon -- so their terms
+        collapse into a bias-like `const`, evaluated here once and
+        cached by `DualGNN.forward` across the rollout's forwards.
 
         Parameters
         ----------
@@ -312,7 +318,7 @@ class DualGNN(nn.Module):
         Number of `_Layer` rounds. Default 16.
     """
 
-    def __init__(self, *, D=32, K=16):
+    def __init__(self, *, D: int = 32, K: int = 16) -> None:
         super().__init__()
         # hyperparameters
         self.D = D
@@ -419,10 +425,14 @@ class DualGNN(nn.Module):
     @staticmethod
     def _routing(edge_indices, *, Nsimps):
         """
-        Static per-graph message routing shared by every `_Layer` call:
-        sender / receiver indices in dst-sorted order, per-node incoming-edge
-        counts (the segment lengths), and a mask of isolated nodes (`None`
-        when every node has an incoming edge, the usual case).
+        Order the edge list so each node's incoming messages form
+        one contiguous block of memory. Sorting the edges by receiver
+        once lets the layers aggregate by streaming adjacent rows
+        (`segment_reduce`, the numba kernel) instead of scattering to
+        arbitrary destinations. Returns the sorted sender/receiver
+        indices, each node's incoming-edge count and block boundaries,
+        and a mask of edge-less nodes (`None` when there are none, the
+        usual case).
 
         Returns
         -------
@@ -448,11 +458,66 @@ class DualGNN(nn.Module):
         return (src_sorted, dst_sorted, seg_lengths, seg_offsets,
                 isolated if isolated.any() else None)
 
+    def _graph_static(self, circ_features, edge_indices, *, Nsimps):
+        """
+        Don't recompute, at every rollout step, what depends only
+        on the polygon. Sampling calls `forward` once per placed simp
+        with the same graph tensors each time; this method computes the
+        graph-derived inputs (`_aggregate_circ`, `_routing`, the layers'
+        `_fold_static` terms) on the first call and replays them after.
+
+        Cache validity is two checks: same graph tensors (by `is`), and
+        no in-place update to the mlp[0] weights/biases since (their
+        `_version` counters change on optimizer steps; the folded terms
+        bake these weights in). Grad-mode calls skip the cache and get
+        `None` per-layer terms -- each layer then folds within the
+        autograd graph, so training gradients stay exact.
+
+        Returns
+        -------
+        circ_agg : Tensor
+            See `_aggregate_circ`.
+        routing : tuple
+            See `_routing`.
+        consts, w_cats : list[Tensor] or list[None]
+            Per-layer folded terms (see `_Layer._fold_static`).
+        """
+        use_cache = not torch.is_grad_enabled()
+        wver = tuple(v for l in self.layers
+                     for v in (l.mlp[0].weight._version,
+                               l.mlp[0].bias._version))
+        cache = self._fwd_cache
+        if (use_cache and cache is not None
+                and cache["cf"] is circ_features
+                and cache["ei"] is edge_indices
+                and cache["wver"] == wver):
+            return (cache["circ_agg"], cache["routing"],
+                    cache["consts"], cache["w_cats"])
+
+        circ_agg = self._aggregate_circ(circ_features, edge_indices,
+                                        Nsimps=Nsimps)
+        routing  = self._routing(edge_indices, Nsimps=Nsimps)
+        if not use_cache:
+            none = [None] * len(self.layers)
+            return circ_agg, routing, none, none
+
+        folded = [l._fold_static(circ_agg) for l in self.layers]
+        consts = [c for c, _ in folded]
+        w_cats = [w for _, w in folded]
+        self._fwd_cache = {
+            "cf": circ_features, "ei": edge_indices, "wver": wver,
+            "circ_agg": circ_agg, "routing": routing,
+            "consts": consts, "w_cats": w_cats,
+        }
+        return circ_agg, routing, consts, w_cats
+
     def _aggregate_circ(self, circ_features, edge_indices, *, Nsimps):
         """
-        Per-node `(sum, min, max)` of incoming-edge circuit features: the
-        state-independent columns of every `_Layer`'s aggregation, computed
-        once per forward instead of per layer and batch element.
+        Compute the circuit half of the message aggregation once,
+        not `K * batch` times. A message is `(circ, state)` and the
+        layers reduce messages elementwise, so each node's sum/min/max
+        over the circ columns is a fixed property of the graph; this
+        evaluates it once and the layers reuse it every round.
 
         Returns
         -------
@@ -469,7 +534,13 @@ class DualGNN(nn.Module):
             aggs.append(agg)
         return torch.cat(aggs, dim=-1).unsqueeze(0)
 
-    def forward(self, circ_features, edge_indices, placed, legal):
+    def forward(
+        self,
+        circ_features: torch.Tensor,
+        edge_indices:  torch.Tensor,
+        placed:        torch.Tensor,
+        legal:         torch.Tensor,
+    ) -> torch.Tensor:
         """
         Score the next simp to place for each batch element. Does so via
             1) initializing hidden states via `init_mlp(metadata)`,
@@ -503,39 +574,9 @@ class DualGNN(nn.Module):
             legal.float().unsqueeze(-1),
         ], dim=-1)
 
-        # graph-static work (routing sort, circ aggregation, per-layer
-        # folded constants) is identical for every step of an AR rollout,
-        # which calls forward dozens of times with the SAME graph tensors.
-        # Memoize one graph's worth, keyed on tensor identity + the mlp[0]
-        # weight/bias versions (so an optimizer step invalidates it).
-        # Grad-mode calls bypass the cache entirely.
-        Nsimps    = placed.shape[-1]
-        use_cache = not torch.is_grad_enabled()
-        wver = tuple(v for l in self.layers
-                     for v in (l.mlp[0].weight._version,
-                               l.mlp[0].bias._version))
-        cache = self._fwd_cache
-        if (use_cache and cache is not None
-                and cache["cf"] is circ_features
-                and cache["ei"] is edge_indices
-                and cache["wver"] == wver):
-            circ_agg, routing = cache["circ_agg"], cache["routing"]
-            consts, w_cats    = cache["consts"], cache["w_cats"]
-        else:
-            circ_agg = self._aggregate_circ(circ_features, edge_indices,
-                                            Nsimps=Nsimps)
-            routing  = self._routing(edge_indices, Nsimps=Nsimps)
-            if use_cache:
-                folded = [l._fold_static(circ_agg) for l in self.layers]
-                consts = [c for c, _ in folded]
-                w_cats = [w for _, w in folded]
-                self._fwd_cache = {
-                    "cf": circ_features, "ei": edge_indices, "wver": wver,
-                    "circ_agg": circ_agg, "routing": routing,
-                    "consts": consts, "w_cats": w_cats,
-                }
-            else:
-                consts = w_cats = [None] * len(self.layers)
+        circ_agg, routing, consts, w_cats = self._graph_static(
+            circ_features, edge_indices, Nsimps=placed.shape[-1],
+        )
 
         # CPU inference runs node-major (Nsimps, batch, D): every per-node
         # op acts on the last dim either way, and the layers' aggregation

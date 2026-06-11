@@ -121,7 +121,7 @@ class TrainConfig:
                                   and len(self.poly_ids) == 1)
 
 
-def train(cfg: TrainConfig | None = None, **kwargs):
+def train(cfg: TrainConfig | None = None, **kwargs) -> None:
     """Run a `Trainer`. Pass a built `TrainConfig` as `cfg`, or field
     overrides as `kwargs` (forwarded to a default `TrainConfig`)."""
     Trainer(cfg or TrainConfig(**kwargs)).run()
@@ -140,7 +140,7 @@ class Trainer:
 
     Configuration via `TrainConfig` (see that class for the full list).
     """
-    def __init__(self, cfg: TrainConfig):
+    def __init__(self, cfg: TrainConfig) -> None:
         self.cfg = cfg
 
         if cfg.compile_model:
@@ -215,7 +215,7 @@ class Trainer:
         self.rng_eval    = np.random.default_rng(cfg.seed + 11)
         self.rng_explore = np.random.default_rng(cfg.seed + 23)
 
-    def run(self):
+    def run(self) -> None:
         """Main training loop. Iterates `cfg.n_steps` gradient steps, with
         periodic validation, exploration, and checkpointing."""
         self.step = self.start_step
@@ -540,7 +540,7 @@ def load_poly_state(
 def setup_local_run_data(
     *, run_dir: Path, poly_ids: list[int] | None,
     src_polygons: Path = POLYGONS_PARQUET, src_fts_dir: Path = FTS_DIR,
-):
+) -> tuple[Path, Path]:
     """
     Materialize a run-local copy of the global polygons + FRTs.
 
@@ -634,8 +634,11 @@ def save_polygon(
 
 # batches
 # =======
-def make_batch(*, cmplx, simp_compat_t, simp_cond, rng, batch_size, device,
-               k_min):
+def make_batch(
+    *, cmplx: DualGraph, simp_compat_t: torch.Tensor,
+    simp_cond: SimpConditional, rng: np.random.Generator, batch_size: int,
+    device: str, k_min: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
     """
     Build one batch from one polygon's pool.
 
@@ -693,11 +696,11 @@ def make_batch(*, cmplx, simp_compat_t, simp_cond, rng, batch_size, device,
 # exploration
 # ===========
 def explore_polygon(
-    state: PolyState, net, *,
+    state: PolyState, net: DualGNN, *,
     n_per_round: int, beta: float, device: str,
     rng: np.random.Generator, val_frac: float,
     run_fts_dir: Path,
-):
+) -> dict:
     """
     Run one explore round on `state`'s polygon: AR-sample, drop irregular draws,
     dedup novels against `state.pool_keys`, append novels into`state`'s pools +
@@ -800,7 +803,8 @@ def explore_polygon(
 
 # schedules
 # =========
-def lr_schedule(step, *, warmup, total, base_lr):
+def lr_schedule(step: int, *, warmup: int, total: int,
+                base_lr: float) -> float:
     """Linear warmup over `warmup` steps to `base_lr`, then cosine decay to 0
     by `total`."""
     if step < warmup:
@@ -809,7 +813,8 @@ def lr_schedule(step, *, warmup, total, base_lr):
     return base_lr * 0.5 * (1.0 + math.cos(math.pi * min(1.0, progress)))
 
 
-def k_min_schedule(step, *, total, N_simps_per_ft, gap_start):
+def k_min_schedule(step: int, *, total: int, N_simps_per_ft: int,
+                   gap_start: int) -> int:
     """Linear anneal of `k_min` from `N_simps_per_ft - gap_start` to 0 over
     `total` steps. `gap_start >= N_simps_per_ft` disables the curriculum."""
     start = max(0, N_simps_per_ft - gap_start)
@@ -818,7 +823,8 @@ def k_min_schedule(step, *, total, N_simps_per_ft, gap_start):
 
 # losses
 # ======
-def cross_entropy(logits, target):
+def cross_entropy(logits: torch.Tensor,
+                  target: torch.Tensor) -> torch.Tensor:
     """Soft-target cross-entropy `-sum(target * log_softmax(logits))`, mean
     over batch. `nan_to_num` zeros the `0 * -inf` entries from illegal simps
     (logits masked to -inf with target=0 there)."""
@@ -826,7 +832,7 @@ def cross_entropy(logits, target):
     return -(target * log_p).nan_to_num(0).sum(dim=-1).mean()
 
 
-def target_entropy(target):
+def target_entropy(target: torch.Tensor) -> torch.Tensor:
     """Per-row Shannon entropy of `target`, mean over batch. Convert
     `cross_entropy` into KL via `train/kl = loss - target_entropy`."""
     return -torch.xlogy(target, target).sum(dim=-1).mean()

@@ -55,11 +55,6 @@ from dualgnn.sampler   import compute_legal
 plt.rcParams["keymap.save"] = []
 
 
-# CLI + helpers
-# =============
-def autodetect_device() -> str:
-    return default_device()
-
 # layout
 # ======
 _LAYOUT_KINDS = ("random", "centroid", "spectral", "spring")
@@ -743,7 +738,7 @@ def main():
                    help="cuda|mps|cpu; autodetected if omitted")
     args = p.parse_args()
 
-    device = args.device or autodetect_device()
+    device = args.device or default_device()
     rng = np.random.default_rng()
     pts = random_polygon(8, 8, rng)
     if pts is None:

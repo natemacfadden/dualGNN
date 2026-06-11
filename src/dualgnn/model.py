@@ -27,7 +27,6 @@ from pathlib import Path
 import pickle
 
 import numba
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -216,10 +215,11 @@ class _Layer(nn.Module):
                 h_in[:, :, 3 * D:].numpy(),
             )
         elif torch.is_grad_enabled() or f.device.type != "cuda":
-            # scatter_reduce under grad: its backward distributes min/max
-            # gradients across ties exactly as before (ties are common --
-            # symmetric nodes share hidden states -- and segment_reduce's
-            # backward picks a different subgradient at them)
+            # scatter_reduce for grad mode and non-CUDA, non-CPU devices
+            # (e.g. MPS inference). Under grad its backward distributes
+            # min/max gradients across ties exactly as before (ties are
+            # common -- symmetric nodes share hidden states -- and
+            # segment_reduce's backward picks a different subgradient)
             batch_size, Nsimps, D = f.shape
             f_sender = f_norm[:, src_sorted, :]
             idx   = dst_sorted.view(1, Nedges, 1).expand(batch_size,
@@ -259,10 +259,9 @@ class _Layer(nn.Module):
         if not transposed:
             h_in = torch.cat([f_norm, f_sum, f_min, f_max], dim=-1)
         if const is None:                # uncached (grad-mode) call
-            const, w_cat, w_meta = self._fold_static(circ_agg)
-        else:
-            w_meta = self.mlp[0].weight[:, -self.Dmetadata:]
-        h = (F.linear(h_in, w_cat) + F.linear(metadata, w_meta) + const)
+            const, w_cat = self._fold_static(circ_agg)
+        w_meta = self.mlp[0].weight[:, -self.Dmetadata:]
+        h = F.linear(h_in, w_cat) + F.linear(metadata, w_meta) + const
         return f + self.mlp[2](self.mlp[1](h))
 
     def _fold_static(self, circ_agg):
@@ -284,18 +283,16 @@ class _Layer(nn.Module):
         w_cat : Tensor
             `(D, 4 * D)` float. mlp[0] weight columns for
             `(f, f_sum, f_min, f_max)`, concatenated.
-        w_meta : Tensor
-            `(D, Dmetadata)` float. mlp[0] weight columns for `metadata`.
         """
         D, De = self.D, self.Dedge
-        Wf, Wcs, Ws, Wcm, Wm, Wcx, Wx, Wmeta = torch.split(
+        Wf, Wcs, Ws, Wcm, Wm, Wcx, Wx, _ = torch.split(
             self.mlp[0].weight,
             [D, De, D, De, D, De, D, self.Dmetadata], dim=1,
         )
         cs, cm, cx = circ_agg.split(De, dim=-1)
         const = (F.linear(cs, Wcs) + F.linear(cm, Wcm) + F.linear(cx, Wcx)
                  + self.mlp[0].bias)
-        return const, torch.cat([Wf, Ws, Wm, Wx], dim=1), Wmeta
+        return const, torch.cat([Wf, Ws, Wm, Wx], dim=1)
 
 class DualGNN(nn.Module):
     """
@@ -529,7 +526,7 @@ class DualGNN(nn.Module):
                                             Nsimps=Nsimps)
             routing  = self._routing(edge_indices, Nsimps=Nsimps)
             if use_cache:
-                folded = [l._fold_static(circ_agg)[:2] for l in self.layers]
+                folded = [l._fold_static(circ_agg) for l in self.layers]
                 consts = [c for c, _ in folded]
                 w_cats = [w for _, w in folded]
                 self._fwd_cache = {
@@ -542,8 +539,9 @@ class DualGNN(nn.Module):
 
         # CPU inference runs node-major (Nsimps, batch, D): every per-node
         # op acts on the last dim either way, and the layers' aggregation
-        # is faster in this layout (see the _Layer docstring)
-        transposed = (placed.device.type != "cuda"
+        # is faster in this layout (see the _Layer docstring). CPU only:
+        # the numba kernel views tensors as numpy, which MPS cannot do
+        transposed = (placed.device.type == "cpu"
                       and not torch.is_grad_enabled())
         if transposed:
             metadata = metadata.transpose(0, 1).contiguous()

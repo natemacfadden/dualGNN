@@ -168,7 +168,6 @@ def sample(
     # read from DualGraph
     # -------------------
     N_simps_per_ft = dualgraph.N_simps_per_ft
-    Nsimps         = dualgraph.simps.shape[0]
     circ_features  = torch.from_numpy(dualgraph.circ_features).float().to(device)
     edge_indices   = torch.from_numpy(dualgraph.edges).to(device)
     compat         = torch.from_numpy(dualgraph.simp_compat).to(device)

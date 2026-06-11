@@ -37,7 +37,7 @@ SQUARE = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.int64)
     (np.array([[0, 0], [1, 0]]),                 ">= 3 lattice points"),
     (np.array([[0, 0], [1, 0], [0, 1], [1, 0]]), "duplicate"),
     (np.array([[0, 0], [1, 0], [2, 0], [3, 0]]), "collinear"),
-    (np.array([[0, 0], [2, 0], [0, 2]]),         "ALL lattice points"),
+    (np.array([[0, 0], [2, 0], [0, 2]]),         "all lattice points"),
 ])
 def test_bad_inputs_raise_value_error(bad, match):
     with pytest.raises(ValueError, match=match):

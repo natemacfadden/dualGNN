@@ -50,7 +50,7 @@ def sample_frts(
     `model`), deduplicate, and optionally keep only regular ones.
 
     Stable contract (downstream code, e.g. CYTools, relies on it):
-        - `pts` is the polygon's FULL lattice-point set, `(Npts, 2)` int,
+        - `pts` is the polygon's full lattice-point set, `(Npts, 2)` int,
           and returned simplices index into `pts` in the caller's row order
         - every sample is a fine triangulation of all of `pts`; simplices
           come back canonicalized (vertex indices sorted ascending, simps
@@ -141,8 +141,8 @@ def sample(
         Print a warning when `beta != 1.0`. Default True.
     compile_model : bool, optional
         If True, wrap `net` with `torch.compile(net, dynamic=True)`. Only
-        worth it for LARGE polygons (~1.2x at Npts=64); on small ones the
-        per-step guard overhead makes it a net LOSS (~0.8x at Npts=19),
+        worth it for large polygons (~1.2x at Npts=64); on small ones the
+        per-step guard overhead makes it a net loss (~0.8x at Npts=19),
         and the first call pays ~20s of compilation. For repeated calls,
         compile once externally instead. Default False.
 

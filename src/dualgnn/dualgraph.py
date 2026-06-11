@@ -122,7 +122,7 @@ class DualGraph:
 def _validate_pts(pts) -> None:
     """
     Validate the `DualGraph(pts)` input contract: an `(Npts, 2)` integer
-    array holding ALL lattice points of a 2D convex polygon (vertices,
+    array holding all lattice points of a 2D convex polygon (vertices,
     boundary, and interior), with no duplicates. Raises `ValueError` with
     a specific message on each violation; silent acceptance of any of
     them would corrupt the fineness/dedup guarantees downstream.
@@ -173,7 +173,7 @@ def _validate_pts(pts) -> None:
         full = enum_lattice_pts(arr)
     if full is not None and len(full) != len(arr):
         raise ValueError(
-            f"DualGraph(pts) expects ALL lattice points of the polygon "
+            f"DualGraph(pts) expects all lattice points of the polygon "
             f"(vertices, boundary, and interior): got {len(arr)} points "
             f"but conv(pts) contains {len(full)}. Build the input with "
             f"dualgnn.geometry.enum_lattice_pts(vertices)."

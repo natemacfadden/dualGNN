@@ -63,7 +63,13 @@ class _Layer(nn.Module):
           (`DualGNN._aggregate_circ`), not per layer and batch element
         - on CUDA inference the `f` columns reduce via `segment_reduce`
           over dst-sorted edges (contiguous segments, no atomics); under
-          grad (and off CUDA) they keep the original `scatter_reduce`
+          grad they keep the original `scatter_reduce`
+        - on CPU inference the whole forward runs in `(Nsimps, batch, D)`
+          layout (see `transposed` below): a dim-0 scatter of an
+          `(E, batch * D)` view hits torch's fast contiguous-2D CPU path
+          (vectorized row streaming, ~19x per-core over the generic
+          strided dim-1 path; measured single-thread 631 -> 34 ms on the
+          [0,6]^2 trio, with threading a minor factor on the fast form)
         - `mlp[0]` is applied blockwise (one weight slice per input block),
           so the wide `(f, agg, metadata)` concat is never materialized
 
@@ -92,18 +98,20 @@ class _Layer(nn.Module):
             nn.Linear(D, D),
         )
 
-    def forward(self, f, circ_agg, routing, metadata):
+    def forward(self, f, circ_agg, routing, metadata, *, transposed=False):
         """
         Apply one message-passing layer.
 
         Parameters
         ----------
         f : Tensor
-            `(batch_size, Nsimps, D)` float per-node hidden state.
+            `(batch_size, Nsimps, D)` float per-node hidden state --
+            `(Nsimps, batch_size, D)` when `transposed`.
         circ_agg : Tensor
             `(1, Nsimps, 3 * Dedge)` float per-node `(sum, min, max)` of
             incoming-edge circuit features, shared across the batch
-            (`DualGNN._aggregate_circ`).
+            (`DualGNN._aggregate_circ`) -- `(Nsimps, 1, 3 * Dedge)` when
+            `transposed`.
         routing : tuple
             `(src_sorted, dst_sorted, seg_lengths, isolated)` from
             `DualGNN._routing`: sender / receiver simp index per dst-sorted
@@ -112,28 +120,51 @@ class _Layer(nn.Module):
             (`None` if there are none).
         metadata : Tensor
             `(batch_size, Nsimps, Dmetadata)` float per-node state features
-            (placed, legal).
+            (placed, legal) -- `(Nsimps, batch_size, Dmetadata)` when
+            `transposed`.
+        transposed : bool, optional
+            Node-major layout (set by `DualGNN.forward` for CPU inference;
+            see the class docstring). Default False.
 
         Returns
         -------
         f_new : Tensor
-            `(batch_size, Nsimps, D)` float updated hidden state.
+            Updated hidden state, same shape/layout as `f`.
         """
-        batch_size, Nsimps, D = f.shape
         src_sorted, dst_sorted, seg_lengths, isolated = routing
         Nedges = src_sorted.shape[0]
 
         # aggregate each node's incoming messages: per-edge sender features,
         # reduced per node. Nodes with no incoming edges get 0
-        f_norm   = self.norm(f)
-        f_sender = f_norm[:, src_sorted, :]
-        if torch.is_grad_enabled() or f.device.type != "cuda":
-            # scatter_reduce: under grad because its backward distributes
-            # min/max gradients across ties exactly as before (ties are
-            # common -- symmetric nodes share hidden states -- and
-            # segment_reduce's backward picks a different subgradient at
-            # them), and off-CUDA because segment_reduce's CPU kernel
-            # benchmarks ~1.6x slower than this
+        f_norm = self.norm(f)
+        if transposed:
+            # CPU inference, node-major: dim-0 gather + dim-0 scatters of an
+            # (Nedges, batch * D) view, which hits the fast contiguous-2D
+            # scatter path (the batch-major dim-1 scatter takes the generic
+            # strided path, ~19x slower per core)
+            Nsimps, batch_size, D = f.shape
+            f_sender = f_norm[src_sorted].view(Nedges, batch_size * D)
+            idx   = dst_sorted.view(Nedges, 1).expand(Nedges, batch_size * D)
+            f_sum = torch.zeros(Nsimps, batch_size * D,
+                                device=f.device, dtype=f_sender.dtype)
+            f_min = torch.zeros_like(f_sum)
+            f_max = torch.zeros_like(f_sum)
+            f_sum.scatter_reduce_(0, idx, f_sender, reduce="sum",
+                                  include_self=False)
+            f_min.scatter_reduce_(0, idx, f_sender, reduce="amin",
+                                  include_self=False)
+            f_max.scatter_reduce_(0, idx, f_sender, reduce="amax",
+                                  include_self=False)
+            f_sum = f_sum.view(Nsimps, batch_size, D)
+            f_min = f_min.view(Nsimps, batch_size, D)
+            f_max = f_max.view(Nsimps, batch_size, D)
+        elif torch.is_grad_enabled() or f.device.type != "cuda":
+            # scatter_reduce under grad: its backward distributes min/max
+            # gradients across ties exactly as before (ties are common --
+            # symmetric nodes share hidden states -- and segment_reduce's
+            # backward picks a different subgradient at them)
+            batch_size, Nsimps, D = f.shape
+            f_sender = f_norm[:, src_sorted, :]
             idx   = dst_sorted.view(1, Nedges, 1).expand(batch_size,
                                                          Nedges, D)
             f_sum = torch.zeros(batch_size, Nsimps, D,
@@ -149,6 +180,8 @@ class _Layer(nn.Module):
         else:
             # CUDA inference: contiguous segment reductions over the
             # dst-sorted edges, with no atomics. ~1.6x faster than scatter
+            batch_size, Nsimps, D = f.shape
+            f_sender = f_norm[:, src_sorted, :]
             lengths = seg_lengths.view(1, Nsimps).expand(batch_size, Nsimps)
             f_sum = torch.segment_reduce(f_sender, "sum", lengths=lengths,
                                          axis=1, unsafe=True, initial=0.0)
@@ -377,19 +410,30 @@ class DualGNN(nn.Module):
             placed.float().unsqueeze(-1),
             legal.float().unsqueeze(-1),
         ], dim=-1)
-
-        f        = self.init_mlp(metadata)
         circ_agg = self._aggregate_circ(circ_features, edge_indices,
                                         Nsimps=placed.shape[-1])
         routing  = self._routing(edge_indices, Nsimps=placed.shape[-1])
 
+        # CPU inference runs node-major (Nsimps, batch, D): every per-node
+        # op acts on the last dim either way, and the layers' scatters
+        # parallelize in this layout (see the _Layer docstring)
+        transposed = (placed.device.type != "cuda"
+                      and not torch.is_grad_enabled())
+        if transposed:
+            metadata = metadata.transpose(0, 1).contiguous()
+            circ_agg = circ_agg.transpose(0, 1)
+
+        f = self.init_mlp(metadata)
+
         # K message-passing rounds
         for layer in self.layers:
-            f = layer(f, circ_agg, routing, metadata)
+            f = layer(f, circ_agg, routing, metadata, transposed=transposed)
 
         # project to logits
         f      = self.norm(f)
         logits = self.head(f).squeeze(-1)
+        if transposed:
+            logits = logits.transpose(0, 1)
 
         # mask and return
         mask = placed.bool() | (~legal.bool())

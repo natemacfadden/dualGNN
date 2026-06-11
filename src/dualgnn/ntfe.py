@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import multiprocessing as mp
 import os
 import time
@@ -55,14 +55,17 @@ def sample_ntfes(
     seed:           int | None = None,
     n_workers:      int        = 1,
     max_tries:      int | None = None,
+    ctx:            NTFEContext | None = None,
+    return_ctx:     bool       = False,
     verbose:        bool       = True,
-) -> np.ndarray | list:
+) -> np.ndarray | list | tuple:
     """
     Sample NTFEs of `poly` using dualGNN and https://arxiv.org/abs/2309.10855.
 
     Regularity: 2-face draws are FRTs (regular by construction). The 4D
-    extension is regular iff `cone_of_permissible_heights` has an interior
-    point -- this is the per-attempt check.
+    extension is regular iff the stacked secondary-cone inequalities of
+    the chosen 2-face FRTs admit a strict interior point -- this is the
+    per-attempt check (run incrementally; see `_sample`).
 
     Parameters
     ----------
@@ -92,6 +95,18 @@ def sample_ntfes(
     max_tries : int, optional
         Raise `RuntimeError` after this many extension attempts (per
         worker, in the parallel path). Default `None` (no cap).
+    ctx : NTFEContext, optional
+        Reuse the setup from an earlier `return_ctx=True` call instead
+        of sampling fresh 2-face FRT pools. When given, `net`,
+        `N_face_triangs`, `batch_size`, and `beta` are ignored (they
+        only shape pool building), and `poly` must be the
+        polytope the context was built from. Note the statistics: calls
+        sharing a `ctx` draw from the SAME finite pools, so their NTFEs
+        are not independent across calls in the way fresh-pool runs are.
+        Default `None` (build fresh).
+    return_ctx : bool, optional
+        If True, also return the built (or passed) `NTFEContext`, for
+        reuse via `ctx` in later calls. Default `False`.
     verbose : bool, optional
         Print progress. Default `True`.
 
@@ -99,25 +114,34 @@ def sample_ntfes(
     -------
     out : ndarray or list of Triangulation
         `(N, npts)` float64 heights, or a length-`N` list of FRSTs if
-        `as_triangs=True`.
+        `as_triangs=True`. With `return_ctx=True`, the tuple
+        `(out, ctx)` instead.
     """
-    ctx = _build_ctx(
-        poly, net,
-        N_face_triangs = N_face_triangs,
-        batch_size     = batch_size,
-        beta           = beta,
-        seed           = seed,
-        verbose        = verbose,
-    )
+    if ctx is None:
+        ctx = build_ntfe_context(
+            poly, net,
+            N_face_triangs = N_face_triangs,
+            batch_size     = batch_size,
+            beta           = beta,
+            seed           = seed,
+            verbose        = verbose,
+        )
+    elif ctx.poly is not poly:
+        raise ValueError(
+            "sample_ntfes: `ctx` was built from a different Polytope "
+            "object than `poly`; reuse a context only with the polytope "
+            "it was built from."
+        )
 
     if n_workers < 0:
         n_workers = min(os.cpu_count() or 1, N)
 
     # serial
     if n_workers <= 1:
-        return _sample(ctx,
-                       N=N, as_triangs=as_triangs,
-                       seed=seed, max_tries=max_tries, verbose=verbose)
+        out = _sample(ctx,
+                      N=N, as_triangs=as_triangs,
+                      seed=seed, max_tries=max_tries, verbose=verbose)
+        return (out, ctx) if return_ctx else out
 
     # parallel
     # spawn workers and split sampling across them. seed=None must stay
@@ -149,20 +173,28 @@ def sample_ntfes(
         print(f"[ntfe] sampling done in {dt:.0f}s "
               f"({N / max(dt, 1e-9):.2f}/s aggregate)", flush=True)
 
-    # return
     if as_triangs:
-        merged: list = []
+        out: list = []
         for c in chunks:
-            merged.extend(c)
-        return merged[:N]
-    return np.concatenate(chunks, axis=0)[:N]
+            out.extend(c)
+        out = out[:N]
+    else:
+        out = np.concatenate(chunks, axis=0)[:N]
+    return (out, ctx) if return_ctx else out
 
 
 # context + helpers
 # =================
 @dataclass
-class _NTFEContext:
-    """Pickleable setup work, shared with worker processes."""
+class NTFEContext:
+    """
+    The reusable setup for NTFE sampling: one FRT pool per distinct
+    2-face geometry, plus the per-face lookups for assembling
+    candidates. Identical across `sample_ntfes` calls on the same
+    polytope -- build once (`build_ntfe_context`, or the `return_ctx`
+    flag) and pass to later calls via `ctx`. Pickleable (shared with
+    worker processes).
+    """
     poly:          Polytope
     npts:          int                 # number of lattice points of `poly`
     # one entry per distinct 2-face geometry
@@ -171,9 +203,13 @@ class _NTFEContext:
     shape_keys:    list[int]           # which pool to draw from
     src_to_labels: list[np.ndarray]    # FRT vertex idx -> parent label
     face_polys:    list[Polytope]      # 2-face as Polytope; call .triangulate
+    # per-face memo of derived inequality rows (filled lazily by
+    # _FaceIneqs; persists across calls so repeated sampling
+    # does not re-derive them)
+    ineq_rows:     dict = field(default_factory=dict)
 
 
-def _build_ctx(
+def build_ntfe_context(
     poly:           Polytope,
     net:            DualGNN,
     *,
@@ -182,8 +218,16 @@ def _build_ctx(
     beta:           float      = 1.0,
     seed:           int | None = None,
     verbose:        bool       = True,
-) -> _NTFEContext:
-    """Group 2-faces by GL(2,Z)+t geometry, sample one FRT pool per group."""
+) -> NTFEContext:
+    """
+    Build the reusable setup for `sample_ntfes`: group `poly`'s 2-faces
+    by GL(2,Z)+translation geometry and sample one FRT pool per group
+    with the dualGNN sampler. The result is identical across
+    `sample_ntfes` calls on the same polytope, so build it once and
+    pass it to repeated calls via `ctx` rather than resampling.
+
+    Parameters are as in `sample_ntfes`.
+    """
     shapes, shape_keys, src_to_labels, face_polys = _decompose_2faces(poly)
     if verbose:
         sizes = [s.shape[0] for s in shapes]
@@ -212,7 +256,7 @@ def _build_ctx(
                   f"({time.perf_counter() - t0:.1f}s)", flush=True)
         pools.append(pool)
 
-    return _NTFEContext(
+    return NTFEContext(
         poly          = poly,
         npts          = len(poly.labels),
         pools         = pools,
@@ -222,7 +266,7 @@ def _build_ctx(
     )
 
 def _sample(
-    ctx:        _NTFEContext,
+    ctx:        NTFEContext,
     *,
     N:          int,
     as_triangs: bool       = False,
@@ -230,11 +274,23 @@ def _sample(
     max_tries:  int | None = None,
     verbose:    bool       = True,
 ):
-    """Sample candidate 2-face FRTs until `N` extend to NTFEs."""
-    # lazy import: cytools.ntfe isn't needed for the 2D path
-    from cytools.ntfe.ntfe import cone_of_permissible_heights
+    """
+    Sample candidate 2-face FRT combinations until `N` extend to NTFEs.
 
+    Rejection sampling: draw one FRT per 2-face independently, accept
+    iff the stacked secondary-cone inequalities admit a strict interior
+    point. The check runs face-by-face on one persistent warm LP,
+    aborting an attempt at its first infeasible prefix -- valid because
+    infeasibility is monotone in prefixes, so the accept/reject
+    decision (and hence the sampled distribution) is identical to
+    checking the full stack, while failed attempts only pay a few warm
+    solves down to their first failure. Inequality rows per (face, pool
+    entry) are derived once and memoized on `ctx`.
+    """
     rng     = np.random.default_rng(seed)
+    order   = _adjacency_order(ctx)
+    ineqs   = [_FaceIneqs(ctx, j) for j in order]
+    lp      = _IncrementalLP(ctx.npts)
     heights = np.empty((N, ctx.npts), dtype=np.float64)
     ntfes: list = [] if as_triangs else None
 
@@ -247,37 +303,29 @@ def _sample(
             raise RuntimeError(
                 f"sample_ntfes: only {n_ok}/{N} extended after "
                 f"{n_try} attempts (max_tries={max_tries})")
-        n_try  += 1
-        triangs = []
-        for shape_key, src_to_label, face_poly in zip(
-            ctx.shape_keys, ctx.src_to_labels, ctx.face_polys,
-        ):
-            pool      = ctx.pools[shape_key]
-            simp_idxs = pool[rng.integers(pool.shape[0])]
-            # include_points_interior_to_facets=True: 2-faces that are
-            # themselves reflexive (e.g. 2x2 squares centered at origin)
-            # would otherwise drop edge-interior points, breaking the
-            # FRT label lookup
-            triangs.append(face_poly.triangulate(
-                simplices = src_to_label[simp_idxs].tolist(),
-                include_points_interior_to_facets = True))
-        # cone of heights making the 2-face FRTs extend to a regular NTFE
-        cone = cone_of_permissible_heights(
-            triangs, npts=ctx.npts, poly=ctx.poly)
-        h    = cone.find_interior_point()
-        if h is not None:
-            h_arr         = np.asarray(h, dtype=np.float64)
+        n_try += 1
+        ok, pushed = True, 0
+        for q in ineqs:
+            if lp.push(q[rng.integers(len(q))]):  # infeasible push
+                pushed += 1                       # self-pops
+            else:
+                ok = False
+                break
+        if ok:
+            h_arr         = lp.witness()
             heights[n_ok] = h_arr
             if as_triangs:
                 ntfes.append(ctx.poly.triangulate(
                     heights=h_arr, make_star=True))
             n_ok += 1
+        for _ in range(pushed):
+            lp.pop()
 
         # log on milestones and every >5s of wall time, including dry
         # stretches with no accepted extension yet
         if verbose:
             now       = time.perf_counter()
-            milestone = h is not None and n_ok in (1, 10, 100, 1000)
+            milestone = ok and n_ok in (1, 10, 100, 1000)
             if now - t_last_log > 5 or milestone:
                 t_last_log = now
                 dt     = now - t_start
@@ -428,3 +476,142 @@ def _find_gl2z_iso(
             if frozenset(map(tuple, mapped.tolist())) == P_dst_set:
                 return A, t
     return None, None
+
+
+# incremental feasibility
+# =======================
+class _FaceIneqs:
+    """
+    One 2-face's pool, as inequality rows: entry `k` is the secondary cone of
+    the pool's k-th FRT, nonzero over only the points in this face. Rows are
+    derived on first touch and memoized on `ctx.ineq_rows`, so repeated sampling
+    never re-derives them.
+    """
+
+    def __init__(self, ctx: NTFEContext, face_idx: int) -> None:
+        self.pool      = ctx.pools[ctx.shape_keys[face_idx]]
+        self.s2l       = ctx.src_to_labels[face_idx]
+        self.face_poly = ctx.face_polys[face_idx]
+        self.npts      = ctx.npts
+        self._memo: dict[int, np.ndarray] = \
+            ctx.ineq_rows.setdefault(face_idx, {})
+
+    def __len__(self) -> int:
+        return len(self.pool)
+
+    def __getitem__(self, k: int) -> np.ndarray:
+        k = int(k)
+        if k not in self._memo:
+            # lazy: cytools is conda-only and not needed for the 2D path
+            from cytools.ntfe.ntfe import _2d_frt_cone_ineqs
+            triang = self.face_poly.triangulate(
+                simplices=self.s2l[self.pool[k]].tolist(),
+                include_points_interior_to_facets=True,
+            )
+            rows = _2d_frt_cone_ineqs(triang, self.npts)
+            self._memo[k] = np.asarray(rows.dense(), dtype=np.float64)
+        return self._memo[k]
+
+
+def _adjacency_order(ctx: NTFEContext) -> list[int]:
+    """
+    Order the 2-faces so interacting ones are checked early: walk the facets so
+    consecutive facets share a 2-face, emitting each facet's not-yet-seen
+    2-faces in turn. Faces conflict only through shared points, so this
+    front-loading roughly halves the depth at which an attempt's first
+    infeasibility surfaces, and with it the number of solves a rejected attempt
+    costs (see experiments/ntfe_gluing).
+    """
+    pts = [set(int(v) for v in s2l) for s2l in ctx.src_to_labels]
+    facet_labels = [set(int(v) for v in f.labels)
+                    for f in ctx.poly.facets()]
+    facet_faces: list[list[int]] = [[] for _ in facet_labels]
+    for j, face_pts in enumerate(pts):
+        for i, fl in enumerate(facet_labels):
+            if face_pts <= fl:
+                facet_faces[i].append(j)
+
+    # greedy facet walk: hop to an unvisited facet sharing a 2-face with
+    # the current one; fall back to any unvisited facet
+    n_facets   = len(facet_labels)
+    visited    = [False] * n_facets
+    cur        = 0
+    facet_walk = [cur]
+    visited[cur] = True
+    while len(facet_walk) < n_facets:
+        shared = [i for i in range(n_facets) if not visited[i]
+                  and set(facet_faces[i]) & set(facet_faces[cur])]
+        cur = shared[0] if shared else visited.index(False)
+        visited[cur] = True
+        facet_walk.append(cur)
+
+    order: list[int] = []
+    seen:  set[int]  = set()
+    for i in facet_walk:
+        for j in facet_faces[i]:
+            if j not in seen:
+                seen.add(j)
+                order.append(j)
+    assert len(order) == len(pts)
+    return order
+
+
+# incremental feasibility
+# =======================
+class _IncrementalLP:
+    """
+    One persistent LP model: strict feasibility of the stacked prefix `H x >= 1`
+    over the height coordinates, with rows added face-by-face (`push`) and
+    removed when an attempt ends (`pop`) so dual simplex re-solves from the
+    previous basis instead of from scratch (~25x cheaper per solve than cold
+    full-stack solves, measured). Free variables, zero objective.
+    """
+
+    def __init__(self, npts: int) -> None:
+        # lazy: only the NTFE path needs highspy
+        try:
+            import highspy
+        except ImportError as e:
+            raise ImportError(
+                "sample_ntfes needs the `highspy` LP solver: "
+                "pip install highspy"
+            ) from e
+        self._highspy = highspy
+        self.h = highspy.Highs()
+        self.h.silent()
+        inf = highspy.kHighsInf
+        self.h.addVars(npts, np.full(npts, -inf), np.full(npts, inf))
+        self.depth_rows: list[int] = []
+
+    def push(self, rows: np.ndarray) -> bool:
+        """Add one face's rows; return strict feasibility of the stack.
+        Infeasible pushes are rolled back internally."""
+        n = len(rows)
+        if n:
+            ncols  = rows.shape[1]
+            starts = np.arange(n, dtype=np.int32) * ncols
+            index  = np.tile(np.arange(ncols, dtype=np.int32), n)
+            self.h.addRows(n, np.ones(n),
+                           np.full(n, self._highspy.kHighsInf),
+                           n * ncols, starts, index, rows.ravel())
+            self.h.run()
+            ok = (self.h.getModelStatus()
+                  == self._highspy.HighsModelStatus.kOptimal)
+        else:                              # elementary face: no rows
+            ok = True
+        self.depth_rows.append(n)
+        if not ok:
+            self.pop()
+        return ok
+
+    def pop(self) -> None:
+        """Remove the most recent level's rows (backtrack)."""
+        n = self.depth_rows.pop()
+        if n:
+            total = self.h.getNumRow()
+            self.h.deleteRows(
+                n, np.arange(total - n, total, dtype=np.int32))
+
+    def witness(self) -> np.ndarray:
+        """The current solve's interior point (the NTFE heights)."""
+        return np.array(self.h.getSolution().col_value)

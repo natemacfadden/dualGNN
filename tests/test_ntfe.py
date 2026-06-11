@@ -30,7 +30,7 @@ cytools = pytest.importorskip("cytools")
 
 # local imports
 from dualgnn.model import DualGNN
-from dualgnn.ntfe  import sample_ntfes
+from dualgnn.ntfe  import build_ntfe_context, sample_ntfes
 
 
 def test_sample_ntfes_end_to_end():
@@ -71,3 +71,34 @@ def test_sample_ntfes_max_tries_raises():
     with pytest.raises(RuntimeError, match="max_tries"):
         sample_ntfes(poly, net, N=2, N_face_triangs=10,
                      seed=0, max_tries=1, verbose=False)
+
+
+def test_sample_ntfes_ctx_reuse():
+    """`return_ctx=True` hands back the setup; reusing it reproduces the
+    fresh-build call exactly and rejects a mismatched polytope."""
+    verts = [[ 1,  0,  0,  0], [ 0,  1,  0,  0], [ 0,  0,  1,  0],
+             [ 0,  0,  0,  1], [-1, -1, -1, -1]]
+    poly = cytools.Polytope(np.array(verts, dtype=np.int64))
+    net  = DualGNN.default(device="cpu")
+
+    fresh, ctx = sample_ntfes(poly, net, N=2, N_face_triangs=10, seed=0,
+                              max_tries=1000, return_ctx=True,
+                              verbose=False)
+    via_ctx = sample_ntfes(poly, net, N=2, seed=0, max_tries=1000,
+                           ctx=ctx, verbose=False)
+    assert np.array_equal(fresh, via_ctx)
+
+    # the explicit builder yields the same context (same-seed pools)
+    built = build_ntfe_context(poly, net, N_face_triangs=10, seed=0,
+                               verbose=False)
+    assert all(np.array_equal(a, b)
+               for a, b in zip(ctx.pools, built.pools))
+
+    # a second reuse with another seed draws from the same pools
+    more = sample_ntfes(poly, net, N=2, seed=1, max_tries=1000,
+                        ctx=ctx, verbose=False)
+    assert more.shape == fresh.shape
+
+    other = cytools.Polytope(np.array(verts, dtype=np.int64))
+    with pytest.raises(ValueError, match="different Polytope"):
+        sample_ntfes(other, net, N=2, ctx=ctx, verbose=False)

@@ -84,7 +84,7 @@ For inference (sampling with the shipped model):
 ```
 pip install dualgnn
 ```
-The model checkpoints ship inside the package. By default this pulls the standard PyTorch build, which on Linux bundles CUDA (a multi-GB download); on a CPU-only or Apple-silicon machine, install the matching wheel first (e.g. `pip install torch --index-url https://download.pytorch.org/whl/cpu`) then `pip install dualgnn`. The tutorials' plotting and the GUI additionally need matplotlib (`pip install dualgnn[viz]`).
+The model checkpoints ship inside the package. By default this pulls the standard PyTorch build, which on Linux bundles CUDA (a multi-GB download); on a CPU-only or Apple-silicon machine, install the matching wheel first (e.g. `pip install torch --index-url https://download.pytorch.org/whl/cpu`) then `pip install dualgnn`. The tutorials' plotting and the GUI additionally need matplotlib (`pip install dualgnn[viz]`); the NTFE pipeline additionally needs CYTools from the conda environment below.
 
 For training (and development), use the conda environment -- the training pipeline needs CYTools, which pip cannot install (`pip install dualgnn[train]` fails on purpose and points you here):
 ```
@@ -164,6 +164,18 @@ heights = sample_ntfes(poly, net, N=20, N_face_triangs=1_000, n_workers=4) # (20
 
 Each row is a height vector defining an FRST; pass `as_triangs=True` to get
 CYTools `Triangulation` objects instead. See `tutorials/ntfe_demo.ipynb`.
+
+The per-2-face FRT pools are identical across calls on the same
+polytope. To sample more NTFEs later without resampling them, ask the
+first call to hand the setup back, then feed it to the next call:
+
+```python
+h1, ctx = sample_ntfes(poly, net, N=20, return_ctx=True)  # pools built once
+h2      = sample_ntfes(poly, net, N=200, ctx=ctx)         # pools reused
+```
+
+(Calls sharing a `ctx` draw from the same finite pools, so they are not
+independent across calls the way fresh-pool runs are.)
 
 ## Train end-to-end
 

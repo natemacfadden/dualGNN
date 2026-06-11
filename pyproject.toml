@@ -16,6 +16,7 @@ dependencies = [
     "numba",
     "torch>=2.7",
     "regfans",
+    "highspy",    # NTFE pipeline's LP solver
 ]
 
 [project.urls]

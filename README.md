@@ -3,6 +3,8 @@
 
 **Paper:** [Sampling Triangulations and Calabi-Yau Threefolds with Autoregressive GNNs](https://arxiv.org/abs/2605.27770) (arXiv:2605.27770; [PDF in this repo](https://github.com/natemacfadden/dualGNN/blob/main/docs/paper.pdf))
 
+**Now in [CYTools](https://cy.tools):** `polytope.random_triangulations_gnn(N)` samples Calabi-Yau (NTFE) triangulations of a reflexive 4D polytope with this model drawing the 2-face triangulations under the hood.
+
 [![PyPI](https://img.shields.io/pypi/v/dualgnn)](https://pypi.org/project/dualgnn/)
 [![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.20622920.svg)](https://doi.org/10.5281/zenodo.20622920)
 [![HF](https://img.shields.io/badge/%F0%9F%A4%97-model-yellow)](https://huggingface.co/natemacfadden/dualGNN)

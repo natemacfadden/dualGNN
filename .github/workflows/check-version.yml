@@ -1,0 +1,27 @@
+name: Check Version
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  citation-version:
+    name: CITATION.cff version gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check CITATION.cff version matches pyproject.toml
+        run: |
+          PYPROJECT_V=$(grep -m1 -E '^version *= *' pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          CFF_V=$(grep -m1 -E '^version: *' CITATION.cff | sed -E 's/^version: *"?([^"[:space:]]+).*/\1/')
+          echo "pyproject=$PYPROJECT_V  CITATION.cff=$CFF_V"
+          if [ "$PYPROJECT_V" != "$CFF_V" ]; then
+            echo "::error::Version drift: pyproject=$PYPROJECT_V vs CITATION.cff=$CFF_V"
+            exit 1
+          fi

@@ -25,9 +25,13 @@ from collections import Counter
 import os
 import time
 
-import matplotlib
-matplotlib.use("Agg")          # headless-safe; we only save figures
-import matplotlib.pyplot as plt
+try:
+    import matplotlib
+    matplotlib.use("Agg")      # headless-safe; we only save figures
+    import matplotlib.pyplot as plt
+    _HAVE_MPL = True
+except ModuleNotFoundError:    # plotting is optional; the table + cache don't need it
+    _HAVE_MPL = False
 import numpy as np
 
 # local imports
@@ -233,6 +237,12 @@ def run(poly, samples):
           "=> more uniform)")
 
     _save_cache(tag, cache)
+
+    if not _HAVE_MPL:
+        print("\nmatplotlib not installed -- the diagnostics table above is "
+              "complete and the draws were cached; skipping the rank-frequency "
+              "and KL-vs-time figures (pip install dualgnn[viz] to generate them).")
+        return
 
     # rank-frequency of sampled FRTs (flat => uniform-like)
     fig, ax = plt.subplots(figsize=(7, 4))

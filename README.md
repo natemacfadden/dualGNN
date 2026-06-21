@@ -42,6 +42,8 @@ The major limitations are that this model was trained with $K=16$ message passin
 
 For string theory applications, it generates uniform samples (when paired with my [NTFE algorithm](https://arxiv.org/abs/2309.10855)) up to $h^{1,1}=86$. Likely higher (we generated samples consistent with being uniform at $h^{1,1}=128$, but it's hard to gain enough confidence in uniformity here). The model runs all the way up to the max $h^{1,1}=491$, but checking uniformity here would require assessing it out of a pool of [at least](https://arxiv.org/abs/2602.16909) $10^{167}$, which our statistics definitely cannot do. Also, we'd likely need more message passing rounds ($K=16$ in attached model).
 
+The samples are uniform because the NTFE algorithm consumes FRTs of the polytope's 2-faces, constructing an FRST of the full 4D polytope via rejection sampling. As discussed in the paper, uniformly sampling FTs => uniformly sampling NTFEs, which is why we can argue uniform samples of CYs despite the large counts of NTFEs ($N_{\mathrm{NTFE}} \lesssim 10^{0.9\,h^{1,1} - 15.45}$, [arXiv:2008.01730](https://arxiv.org/abs/2008.01730)).
+
 ## Results
 
 The figures below are taken **from [the paper](https://github.com/natemacfadden/dualGNN/blob/main/docs/paper.pdf)** (included in this repo) and are

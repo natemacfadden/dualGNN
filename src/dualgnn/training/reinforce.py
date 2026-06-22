@@ -335,7 +335,7 @@ def _train_step(
     for b in range(batch):
         simp_idxs = np.where(placed_np[b])[0]
         regular_mask[b] = is_regular(state.cmplx.pts,
-                                     state.cmplx.simps[simp_idxs])
+                                     state.cmplx.simps[simp_idxs]) is True
 
     # reward: -log P if valid, else INVALID_REWARD
     log_pT    = log_probs_sum.detach()

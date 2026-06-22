@@ -240,7 +240,10 @@ def _classify_regularity(
     simps: np.ndarray,
 ) -> np.ndarray:
     """Per-FT `is_regular(pts, s)` flag for `simps` shape `(Nft, _, 3)`.
-    Used to filter grow2d output to regulars."""
+    Used to filter grow2d output to regulars.
+
+    Must run on the main thread: `is_regular` uses a SIGALRM watchdog, which
+    only works on the main thread (worker threads raise ValueError)."""
     if len(simps) == 0:
         return np.zeros(0, dtype=bool)
     return np.array([bool(is_regular(pts, s)) for s in simps], dtype=bool)

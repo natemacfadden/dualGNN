@@ -32,7 +32,7 @@ This model is trained via supervised learning on a pool of fine regular triangul
 The model
 1) is the most uniform sampler of FRTs tested (there are a few methods due to their application in string theory; we include some custom methods, too),
 2) is general (a single model can be trained that samples FRTs from arbitrary polygons),
-3) is small (~92k parameters; trained in ~7.5hrs; checkpoint attached to this repo),
+3) is small (~92k parameters, about 1300x fewer than [CYTransformer](https://arxiv.org/abs/2507.03732)'s ~120M; trained in ~7.5hrs; checkpoint attached to this repo),
 4) shows good inductive bias (generalizes zero shot), and
 5) is competitive in speed compared to the other tested samplers.
 

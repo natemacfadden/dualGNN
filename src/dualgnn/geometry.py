@@ -247,7 +247,7 @@ def canonical_simps(simps: np.ndarray) -> np.ndarray:
     s = np.sort(simps, axis=1)
     return s[np.lexsort(s.T[::-1])]
 
-def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool:
+def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool | None:
     """
     Check if a triangulation is regular via `regfans`. This requires
         1) homogenizing pts,
@@ -255,8 +255,8 @@ def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool:
         3) checking the regularity of said Fan.
     A 60s SIGALRM timeout guards the call (regfans can hang on degenerate
     inputs); regfans warnings are promoted to errors. Both timeout and
-    promoted-warning are reported and return False; any other exception
-    propagates.
+    promoted-warning are undetermined: reported and return None (not False);
+    any other exception propagates.
 
     Parameters
     ----------
@@ -269,9 +269,17 @@ def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool:
 
     Returns
     -------
-    regular : bool
-        True iff the triangulation is regular. If regfans hangs >60s or emits a
-        warning, this is set to False and logged.
+    regular : bool or None
+        True iff regular, False iff determined irregular. If regfans hangs >60s
+        or emits a warning the result is undetermined: returns None (distinct
+        from a definitive False) and logs a warning.
+
+    Notes
+    -----
+    Uses a SIGALRM watchdog, which only works on the main thread of the main
+    interpreter. Calling this from a worker thread raises ValueError; threaded
+    harvesting needs a thread-safe timeout (e.g. threading.Timer +
+    _thread.interrupt_main).
     """
     if len(simps) == 1:
         return True
@@ -299,9 +307,12 @@ def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool:
             warnings.filterwarnings("error", module="regfans")
             return fan.is_regular()
     except (TimeoutError, Warning) as e:
+        # Undetermined: a hang or a regfans warning is NOT evidence of
+        # irregularity. Return None (distinct from a definitive False) so
+        # callers can tell "couldn't decide" from "decided irregular".
         warnings.warn(f"is_regular: {type(e).__name__}: {e} "
-                      f"(Npts={len(pts)}, Nsimps={len(simps)})")
-        return False
+                      f"(Npts={len(pts)}, Nsimps={len(simps)}) -> undetermined (None)")
+        return None
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old)

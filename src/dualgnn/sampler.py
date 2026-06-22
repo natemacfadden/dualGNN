@@ -94,7 +94,7 @@ def sample_frts(
                  beta=beta, seed=seed, verbose=verbose)
     out = np.unique(out, axis=0)
     if only_regular:
-        keep = np.array([is_regular(pts, s) for s in out], dtype=bool)
+        keep = np.array([is_regular(pts, s) is True for s in out], dtype=bool)
         out  = out[keep]
     return out
 

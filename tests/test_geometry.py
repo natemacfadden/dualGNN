@@ -20,9 +20,12 @@
 # -----------------------------------------------------------------------------
 
 # external imports
+import warnings
+
 import numpy as np
 
 # local imports
+import dualgnn.geometry as geom
 from dualgnn.geometry import canonical_simps, enum_lattice_pts
 
 
@@ -69,6 +72,50 @@ def test_enum_lattice_pts_degenerate():
     # collinear vertices are not a valid polygon -> None
     assert enum_lattice_pts(
         np.array([[0, 0], [1, 1], [2, 2]], dtype=np.int64)) is None
+
+
+# --- is_regular: stub regfans to exercise control flow deterministically -----
+class _FakeFan:
+    """Stand-in for a regfans Fan with a controllable is_regular()."""
+    def __init__(self, mode):
+        self.mode = mode
+
+    def is_regular(self):
+        if self.mode == "regular":   return True
+        if self.mode == "irregular": return False
+        if self.mode == "timeout":   raise TimeoutError("simulated regfans hang")
+        if self.mode == "warning":   raise UserWarning("simulated regfans warning")
+        raise AssertionError("bad mode")
+
+
+def _stub_vc(mode):
+    class _VC:
+        def __init__(self, *a, **k): pass
+        def triangulate(self, cells=None): return _FakeFan(mode)
+    return _VC
+
+
+def test_is_regular_outcomes():
+    # exercise is_regular's control flow without a real triangulation or a 60s hang
+    pts   = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.int64)
+    simps = np.array([[0, 1, 2], [1, 2, 3]], dtype=np.int64)
+    orig  = geom.VectorConfiguration
+    cases = [("regular", True), ("irregular", False),
+             ("timeout", None), ("warning", None)]  # undetermined -> None, not False
+    try:
+        for mode, expected in cases:
+            geom.VectorConfiguration = _stub_vc(mode)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                got = geom.is_regular(pts, simps)
+            assert got is expected, f"{mode}: expected {expected!r}, got {got!r}"
+    finally:
+        geom.VectorConfiguration = orig
+
+
+def test_is_regular_single_simplex_is_trivially_regular():
+    pts = np.array([[0, 0], [1, 0], [0, 1]], dtype=np.int64)
+    assert geom.is_regular(pts, np.array([[0, 1, 2]], dtype=np.int64)) is True
 
 
 if __name__ == "__main__":

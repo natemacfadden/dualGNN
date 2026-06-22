@@ -746,7 +746,7 @@ def explore_polygon(
         print(f"  [explore] AR sampling failed: {exc}")
         return {"success_rate": 0.0, "n_unique": 0, "n_novel": 0}
 
-    regs  = np.array([is_regular(state.pts, s) for s in canon], dtype=bool)
+    regs  = np.array([is_regular(state.pts, s) is True for s in canon], dtype=bool)
     n_reg = int(regs.sum())
 
     new_simps: list[np.ndarray] = []

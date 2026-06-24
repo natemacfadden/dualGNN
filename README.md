@@ -82,7 +82,7 @@ $h^{1,1}=86$; $204$ vs $22$ at $h^{1,1}=128$), a tradeoff for its uniformity.
 held-out polygons (with exact FRT counts) and the uniformity-scoring
 protocol ship in [`eval/`](https://github.com/natemacfadden/dualGNN/tree/main/eval).
 
-## Install
+## Installation
 
 For inference (sampling with the shipped model):
 ```
@@ -239,7 +239,7 @@ and/or this repository:
 }
 ```
 
-## Layout
+## Organization
 
 ```
 src/dualgnn/          library code (DualGraph, DualGNN, sampler, training)

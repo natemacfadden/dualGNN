@@ -328,7 +328,7 @@ class DualGNN(nn.Module):
         self.Dedge     = 4 # (for 2D polytopes)
         self.Dmetadata = 2 # (placed, legal)
 
-        # for setting initial feature vector data... one hot
+        # maps the (placed, legal) metadata to the initial D-dim feature vector
         self.init_mlp = nn.Sequential(
             nn.Linear(self.Dmetadata, D),
             nn.GELU(),

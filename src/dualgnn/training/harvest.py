@@ -246,4 +246,4 @@ def _classify_regularity(
     only works on the main thread (worker threads raise ValueError)."""
     if len(simps) == 0:
         return np.zeros(0, dtype=bool)
-    return np.array([bool(is_regular(pts, s)) for s in simps], dtype=bool)
+    return np.array([is_regular(pts, s) is True for s in simps], dtype=bool)

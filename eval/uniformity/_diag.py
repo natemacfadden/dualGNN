@@ -198,12 +198,12 @@ def run(poly, samples):
     _estimate_runtime(net, pts, samples)
     print()
 
-    learned  = ["dualGNN", "grow2d", "pushing"]
+    samplers = ["dualGNN", "grow2d", "pushing"]
     rows     = {}
     rankfreq = {}
     cache    = {}
 
-    for name in learned:
+    for name in samplers:
         reg, frac, t_per = _draw_regular(name, net, pts, samples, seed=SEED)
         canon  = [canonical_simps(np.asarray(x)) for x in reg]
         keys   = (c.astype(np.int32).tobytes() for c in canon)
@@ -224,7 +224,7 @@ def run(poly, samples):
 
     # table, rows in order of increasing fairness (descending KL), as in
     # the paper
-    order = sorted(learned, key=lambda n: -rows[n]["kl"])
+    order = sorted(samplers, key=lambda n: -rows[n]["kl"])
     hdr = (f"{'sampler':<14}{'reg.frac':>9}{'#unique':>12}{'#collide':>10}"
            f"{'KL':>10}{'sec/draw':>11}")
     print(hdr); print("-" * len(hdr))

@@ -306,10 +306,10 @@ def _sample(
         n_try += 1
         ok, pushed = True, 0
         for q in ineqs:
-            if lp.push(q[rng.integers(len(q))]):  # infeasible push
-                pushed += 1                       # self-pops
+            if lp.push(q[rng.integers(len(q))]):  # feasible: row kept
+                pushed += 1
             else:
-                ok = False
+                ok = False  # infeasible: the push self-popped
                 break
         if ok:
             h_arr         = lp.witness()
@@ -520,7 +520,7 @@ def _adjacency_order(ctx: NTFEContext) -> list[int]:
     2-faces in turn. Faces conflict only through shared points, so this
     front-loading roughly halves the depth at which an attempt's first
     infeasibility surfaces, and with it the number of solves a rejected attempt
-    costs (see experiments/ntfe_gluing).
+    costs.
     """
     pts = [set(int(v) for v in s2l) for s2l in ctx.src_to_labels]
     facet_labels = [set(int(v) for v in f.labels)

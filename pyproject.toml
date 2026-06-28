@@ -15,8 +15,7 @@ dependencies = [
     "scipy",
     "numba",
     "torch>=2.7",
-    "regfans",
-    "highspy",    # NTFE pipeline's LP solver
+    "highspy",    # LP solver: regularity check (is_regular) + NTFE pipeline
 ]
 
 [project.urls]

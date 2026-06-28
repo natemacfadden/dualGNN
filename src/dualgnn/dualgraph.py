@@ -166,7 +166,7 @@ def _validate_pts(pts) -> None:
         )
 
     # all-lattice-points check: catches the common mistake of passing only
-    # the polygon's vertices. Local import (geometry imports regfans)
+    # the polygon's vertices.
     from .geometry import enum_lattice_pts
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

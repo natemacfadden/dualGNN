@@ -20,8 +20,6 @@
 # -----------------------------------------------------------------------------
 
 # external imports
-import warnings
-
 import numpy as np
 
 # local imports
@@ -74,43 +72,57 @@ def test_enum_lattice_pts_degenerate():
         np.array([[0, 0], [1, 1], [2, 2]], dtype=np.int64)) is None
 
 
-# --- is_regular: stub regfans to exercise control flow deterministically -----
-class _FakeFan:
-    """Stand-in for a regfans Fan with a controllable is_regular()."""
-    def __init__(self, mode):
-        self.mode = mode
+# --- is_regular: real triangulations; verdicts independently verified with --
+# --- CYTools. P_{4,4} is the 5x5 lattice grid; point index = x*5 + y. --------
+_PTS_P44 = np.array([[x, y] for x in range(5) for y in range(5)], dtype=np.int64)
 
-    def is_regular(self):
-        if self.mode == "regular":   return True
-        if self.mode == "irregular": return False
-        if self.mode == "timeout":   raise TimeoutError("simulated regfans hang")
-        if self.mode == "warning":   raise UserWarning("simulated regfans warning")
-        raise AssertionError("bad mode")
+# Santos' fine-but-NON-regular triangulation (Kaibel & Ziegler 2003) -- the
+# canonical smallest non-regular fine triangulation. CYTools: fine, irregular.
+_SANTOS_IRREGULAR = np.array([
+    [0, 1, 5], [1, 5, 6], [5, 6, 10], [6, 10, 11], [1, 2, 6], [2, 6, 11],
+    [2, 7, 11], [7, 11, 12], [2, 3, 8], [2, 7, 8], [3, 4, 9], [3, 8, 9],
+    [7, 12, 13], [7, 13, 14], [7, 8, 14], [8, 9, 14], [10, 15, 16],
+    [10, 16, 17], [10, 11, 17], [11, 12, 17], [15, 20, 21], [15, 16, 21],
+    [16, 21, 22], [16, 17, 22], [12, 13, 17], [13, 17, 22], [13, 18, 22],
+    [18, 22, 23], [13, 14, 18], [14, 18, 19], [18, 19, 23], [19, 23, 24],
+], dtype=np.int64)
+
+# Three distinct fine REGULAR triangulations of P_{4,4} (CYTools is_regular ==
+# True), sampled via cytools.random_triangulations_fast.
+_REGULAR = [
+    np.array([
+        [6, 7, 12], [2, 6, 7], [6, 11, 12], [6, 10, 11], [1, 2, 6], [1, 5, 6],
+        [5, 6, 10], [7, 8, 12], [2, 7, 8], [8, 12, 13], [8, 9, 13], [3, 4, 8],
+        [4, 8, 9], [2, 3, 8], [11, 12, 16], [11, 15, 16], [10, 11, 15],
+        [12, 13, 18], [12, 16, 17], [12, 17, 18], [13, 14, 18], [9, 13, 14],
+        [16, 17, 21], [15, 16, 21], [17, 18, 22], [17, 21, 22], [18, 19, 24],
+        [18, 23, 24], [14, 18, 19], [18, 22, 23], [0, 1, 5], [15, 20, 21],
+    ], dtype=np.int64),
+    np.array([
+        [6, 7, 12], [2, 6, 7], [6, 11, 12], [5, 6, 11], [1, 2, 6], [1, 5, 6],
+        [7, 8, 12], [3, 7, 8], [2, 3, 7], [8, 12, 13], [8, 9, 13], [3, 8, 9],
+        [11, 12, 16], [11, 15, 16], [5, 10, 11], [10, 11, 15], [12, 13, 18],
+        [12, 16, 17], [12, 17, 18], [13, 18, 19], [9, 13, 14], [13, 14, 19],
+        [16, 17, 22], [15, 16, 21], [16, 21, 22], [17, 18, 22], [18, 19, 23],
+        [18, 22, 23], [0, 1, 5], [3, 4, 9], [15, 20, 21], [19, 23, 24],
+    ], dtype=np.int64),
+    np.array([
+        [6, 7, 11], [2, 6, 7], [5, 6, 11], [1, 2, 6], [1, 5, 6], [7, 8, 13],
+        [2, 7, 8], [7, 11, 12], [7, 12, 13], [8, 9, 13], [2, 3, 8], [3, 8, 9],
+        [11, 12, 17], [11, 16, 17], [11, 15, 16], [5, 10, 11], [10, 11, 15],
+        [12, 13, 17], [13, 17, 18], [13, 18, 19], [9, 13, 14], [13, 14, 19],
+        [16, 17, 22], [15, 16, 21], [16, 21, 22], [17, 18, 22], [18, 19, 23],
+        [18, 22, 23], [0, 1, 5], [3, 4, 9], [15, 20, 21], [19, 23, 24],
+    ], dtype=np.int64),
+]
 
 
-def _stub_vc(mode):
-    class _VC:
-        def __init__(self, *a, **k): pass
-        def triangulate(self, cells=None): return _FakeFan(mode)
-    return _VC
-
-
-def test_is_regular_outcomes():
-    # exercise is_regular's control flow without a real triangulation or a 60s hang
-    pts   = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.int64)
-    simps = np.array([[0, 1, 2], [1, 2, 3]], dtype=np.int64)
-    orig  = geom.VectorConfiguration
-    cases = [("regular", True), ("irregular", False),
-             ("timeout", None), ("warning", None)]  # undetermined -> None, not False
-    try:
-        for mode, expected in cases:
-            geom.VectorConfiguration = _stub_vc(mode)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                got = geom.is_regular(pts, simps)
-            assert got is expected, f"{mode}: expected {expected!r}, got {got!r}"
-    finally:
-        geom.VectorConfiguration = orig
+def test_is_regular_matches_cytools():
+    # is_regular must reproduce CYTools' verdicts on real triangulations:
+    # the Santos triangulation is irregular, the three samples are regular.
+    assert geom.is_regular(_PTS_P44, _SANTOS_IRREGULAR) is False
+    for i, simps in enumerate(_REGULAR):
+        assert geom.is_regular(_PTS_P44, simps) is True, f"regular_{i} regular"
 
 
 def test_is_regular_single_simplex_is_trivially_regular():

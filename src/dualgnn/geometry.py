@@ -20,19 +20,13 @@
 # -----------------------------------------------------------------------------
 
 # external imports
-import ctypes
+import itertools
 import math
-import signal
 import warnings
+from collections import defaultdict
 
 import numpy as np
-from regfans import VectorConfiguration
 from scipy.spatial import ConvexHull
-
-
-# ppl messes up rounding types... we have to fix them periodically :(
-_libc = ctypes.CDLL(None)
-_libc.fesetround(0)
 
 
 # polytope
@@ -247,75 +241,119 @@ def canonical_simps(simps: np.ndarray) -> np.ndarray:
     s = np.sort(simps, axis=1)
     return s[np.lexsort(s.T[::-1])]
 
-def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool | None:
+def _det3(m: list) -> int:
+    """Exact integer determinant of a 3x3 matrix given as three rows."""
+    a, b, c = m[0]
+    d, e, f = m[1]
+    g, h, i = m[2]
+    return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+
+
+def secondary_cone_ineqs_2d(pts: np.ndarray, simps: np.ndarray) -> np.ndarray:
     """
-    Check if a triangulation is regular via `regfans`. This requires
-        1) homogenizing pts,
-        2) building a Fan in regfans, and then
-        3) checking the regularity of said Fan.
-    A 60s SIGALRM timeout guards the call (regfans can hang on degenerate
-    inputs); regfans warnings are promoted to errors. Both timeout and
-    promoted-warning are undetermined: reported and return None (not False);
-    any other exception propagates.
+    Inward CPL inequality rows `H` of a 2D triangulation's secondary cone,
+    i.e. the cone `{x : H x >= 0}` of height vectors `x` that induce this
+    triangulation. The triangulation is regular iff this cone is
+    full-dimensional (see `is_regular`).
+
+    For each pair of triangles sharing an edge, the four involved points form
+    a circuit whose inward normal is the 1D nullspace of their homogenized
+    coordinate matrix; here that nullspace is computed exactly via integer 3x3
+    minors (no floating point, no exact-CAS dependency).
+
+    Extracted and de-classed from CYTools'
+    `Triangulation._2d_frt_cone_ineqs` (originally written by Nate MacFadden);
+    reimplemented numpy-only so the regularity check needs no
+    secondary-fan/CAS library.
 
     Parameters
     ----------
     pts : ndarray
         `(Npts, 2)` int. Lattice points of the polygon.
     simps : ndarray
-        `(Nsimps, 3)` int. Each row is a triple of indices into `pts`. Together
-        they should cover the polygon (i.e., form a triangulation); the function
-        does not check that.
+        `(Nsimps, 3)` int. Index triples into `pts` forming a triangulation
+        (not checked).
 
     Returns
     -------
-    regular : bool or None
-        True iff regular, False iff determined irregular. If regfans hangs >60s
-        or emits a warning the result is undetermined: returns None (distinct
-        from a definitive False) and logs a warning.
-
-    Notes
-    -----
-    Uses a SIGALRM watchdog, which only works on the main thread of the main
-    interpreter. Calling this from a worker thread raises ValueError; threaded
-    harvesting needs a thread-safe timeout (e.g. threading.Timer +
-    _thread.interrupt_main).
+    H : ndarray
+        `(Nineqs, Npts)` int. Each row is an inward-facing CPL hyperplane
+        normal over the height coordinates.
     """
-    if len(simps) == 1:
+    pts = np.asarray(pts)
+    simps = [list(map(int, s)) for s in simps]
+
+    # for each point, the simplices containing it; then the points each pair
+    # of simplices shares (a shared edge => exactly two shared points)
+    pt_to_simps = defaultdict(list)
+    for si, s in enumerate(simps):
+        for v in s:
+            pt_to_simps[v].append(si)
+    pair_shared = defaultdict(set)
+    for v, sis in pt_to_simps.items():
+        for a, b in itertools.combinations(sis, 2):
+            pair_shared[(a, b)].add(v)
+
+    npts = len(pts)
+    rows = []
+    for (a, b), shared in pair_shared.items():
+        if len(shared) < 2:                  # share an edge => a circuit
+            continue
+        s = list(shared)
+        n_s = [v for v in simps[a] + simps[b] if v not in shared]
+        order = [n_s[0], n_s[1], s[0], s[1]]
+        cols = [[int(pts[k][0]), int(pts[k][1]), 1] for k in order]
+        # 1D nullspace of the 3x4 [x; y; 1]: v_j = (-1)^j det(cols without j)
+        v = []
+        for j in range(4):
+            sub = [cols[k] for k in range(4) if k != j]
+            mat = [[sub[c][r] for c in range(3)] for r in range(3)]
+            v.append(((-1) ** j) * _det3(mat))
+        v = np.array(v, dtype=np.int64)
+        if v[0] < 0:                         # sign: not-shared coefficient positive
+            v = -v
+        row = np.zeros(npts, dtype=np.int64)
+        for k, vi in zip(order, v):
+            row[k] += int(vi)
+        rows.append(row)
+    return (np.array(rows, dtype=np.int64) if rows
+            else np.zeros((0, npts), dtype=np.int64))
+
+
+def is_regular(pts: np.ndarray, simps: np.ndarray) -> bool:
+    """
+    Check whether a 2D triangulation is regular: i.e. whether its secondary
+    cone has nonempty interior, equivalently whether some height vector `x`
+    satisfies `H x >= 1` for the CPL inequalities `H` of
+    `secondary_cone_ineqs_2d`. Decided by an LP feasibility check (HiGHS).
+
+    Parameters
+    ----------
+    pts : ndarray
+        `(Npts, 2)` int. Lattice points of the polygon.
+    simps : ndarray
+        `(Nsimps, 3)` int. Index triples into `pts` forming a triangulation
+        (not checked).
+
+    Returns
+    -------
+    regular : bool
+        True iff the triangulation is regular.
+    """
+    H = secondary_cone_ineqs_2d(pts, simps)
+    if H.shape[0] == 0:                      # no internal edges -> trivially regular
         return True
 
-    # homogenize
-    ones = np.ones((pts.shape[0], 1), dtype=pts.dtype)
-    vecs = np.hstack([pts, ones])
+    import highspy                           # only the regularity path needs it
 
-    # make the fan
-    vc   = VectorConfiguration(vecs, labels=list(range(len(pts))))
-    fan  = vc.triangulate(cells=simps)
-
-    # check regularity, with a SIGALRM watchdog for regfans hangs.
-    # Note: SIGALRM only works on the main thread of the main interpreter,
-    # so calling is_regular from a worker thread will raise ValueError -- if
-    # you ever need threaded harvesting, replace this with a thread-safe
-    # watchdog (e.g. threading.Timer + _thread.interrupt_main).
-    def raise_timeout(signum, frame):
-        raise TimeoutError("is_regular hung")
-
-    old = signal.signal(signal.SIGALRM, raise_timeout)
-    signal.alarm(60)
-    try:
-        with warnings.catch_warnings():
-            warnings.filterwarnings("error", module="regfans")
-            return fan.is_regular()
-    except (TimeoutError, Warning) as e:
-        # Undetermined: a hang or a regfans warning is NOT evidence of
-        # irregularity. Return None (distinct from a definitive False) so
-        # callers can tell "couldn't decide" from "decided irregular".
-        warnings.warn(f"is_regular: {type(e).__name__}: {e} "
-                      f"(Npts={len(pts)}, Nsimps={len(simps)}) -> undetermined (None)")
-        return None
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old)
-
-        # fix ppl's rounding bug
-        _libc.fesetround(0)
+    nr, n = H.shape
+    inf = highspy.kHighsInf
+    h = highspy.Highs()
+    h.silent()
+    h.addVars(n, np.full(n, -inf), np.full(n, inf))
+    starts = (np.arange(nr) * n).astype(np.int32)
+    index = np.tile(np.arange(n, dtype=np.int32), nr)
+    h.addRows(nr, np.ones(nr), np.full(nr, inf),
+              nr * n, starts, index, H.ravel().astype(float))
+    h.run()
+    return h.getModelStatus() == highspy.HighsModelStatus.kOptimal

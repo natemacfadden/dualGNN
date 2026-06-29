@@ -34,6 +34,26 @@ def _two_area(tri):
     (x0, y0), (x1, y1), (x2, y2) = tri
     return x0 * (y1 - y2) + x1 * (y2 - y0) + x2 * (y0 - y1)
 
+def _proj_overlaps(p, q):
+    """Do integer ranges [min p, max p] and [min q, max q] overlap in positive
+    length? Touching at a single point does not count."""
+    return min(max(p), max(q)) > max(min(p), min(q))
+
+def _interiors_overlap(t1, t2):
+    """True if two integer triangles share positive-area interior. Independent
+    separating-axis test (not the sampler's own compatibility code); a shared
+    edge or vertex is a touch, not an overlap."""
+    for tri in (t1, t2):
+        for i in range(3):
+            ax, ay = tri[i]
+            bx, by = tri[(i + 1) % 3]
+            nx, ny = -(int(by) - int(ay)), int(bx) - int(ax)   # edge normal
+            p1 = [nx * int(x) + ny * int(y) for x, y in t1]
+            p2 = [nx * int(x) + ny * int(y) for x, y in t2]
+            if not _proj_overlaps(p1, p2):
+                return False                                   # axis separates
+    return True
+
 def test_sample_outputs_are_valid_fine_triangulations():
     """
     Every sampled triangulation is a valid fine triangulation by construction.
@@ -72,6 +92,34 @@ def test_sample_outputs_are_valid_fine_triangulations():
             edges[(b, c)] += 1
         assert max(edges.values()) <= 2
 
+def test_sample_outputs_tile_without_gaps_or_overlaps():
+    """
+    Stronger than the necessary-but-not-sufficient "edge in <=2 simps" check:
+    confirm each sampled triangulation (a) has total simplex area equal to the
+    polygon area (shoelace) and (b) has no two simplices overlapping in
+    positive-area interior - together a genuine gap-free, overlap-free tiling.
+    """
+    pts = np.array([[x, y] for x in range(4) for y in range(4)],   # [0,3]^2
+                   dtype=np.int64)
+    poly_two_area = 18   # [0,3]^2 is a 3x3 square: area 9, twice-area 18
+    g   = DualGraph(pts)
+    net = DualGNN.default()
+    fts = sample(net, g, Ntriangs=4, seed=0)
+
+    for ft in fts:
+        tris = [pts[s] for s in np.asarray(ft, dtype=np.int64)]
+
+        # (a) areas sum to the polygon area - no net gap or overlap
+        assert sum(abs(_two_area(t)) for t in tris) == poly_two_area
+
+        # (b) no pair shares positive-area interior
+        for i in range(len(tris)):
+            for j in range(i + 1, len(tris)):
+                assert not _interiors_overlap(tris[i], tris[j]), \
+                    f"simps {i},{j} overlap"
+
 if __name__ == "__main__":
     test_sample_outputs_are_valid_fine_triangulations()
-    print("ok  test_sample_outputs_are_valid_fine_triangulations\n\n1 passed")
+    print("ok  test_sample_outputs_are_valid_fine_triangulations")
+    test_sample_outputs_tile_without_gaps_or_overlaps()
+    print("ok  test_sample_outputs_tile_without_gaps_or_overlaps\n\n2 passed")

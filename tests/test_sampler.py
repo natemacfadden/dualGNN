@@ -24,11 +24,13 @@ from collections import Counter
 
 import numpy as np
 import pytest
+import torch
 
 # local imports
 from dualgnn import DualGraph, sample
 from dualgnn.geometry import canonical_simps
 from dualgnn.model import DualGNN
+from dualgnn.sampler import compute_legal
 
 
 def _two_area(tri):
@@ -171,10 +173,48 @@ def test_sampler_is_uniform_over_frts():
     _, p = chisquare(observed)                        # null: uniform over N bins
     assert p > 0.01, f"sampler looks non-uniform: chi-square p={p:.4f}"
 
+def test_aggregation_paths_agree():
+    """
+    The model has three numerically-identical aggregation paths (a fused numba
+    CPU kernel, scatter_reduce, and CUDA segment_reduce). Guard the CPU pair
+    against silent divergence: the numba path (CPU, no grad) and the
+    scatter_reduce path (grad enabled) must agree on identical inputs - same
+    masked positions, finite logits equal to float32 reduction-order noise.
+    Pinned to CPU; the CUDA segment_reduce path is not exercised on a CPU runner.
+    """
+    pts = np.array([[x, y] for x in range(4) for y in range(4)],   # [0,3]^2
+                   dtype=np.int64)
+    g   = DualGraph(pts)
+    net = DualGNN.default(device="cpu")
+
+    circ   = torch.from_numpy(g.circ_features).float()
+    eidx   = torch.from_numpy(g.edges)
+    compat = torch.from_numpy(g.simp_compat)
+    nsimps = len(g.simps)
+
+    placed = torch.zeros(4, nsimps, dtype=torch.bool)
+    placed[:, 0] = True                          # a non-trivial partial state
+    legal = compute_legal(placed, compat)
+
+    with torch.no_grad():                        # CPU + no grad -> numba kernel
+        lo_numba = net(circ, eidx, placed, legal)
+    with torch.enable_grad():                    # grad enabled -> scatter_reduce
+        lo_scatter = net(circ, eidx, placed, legal).detach()
+
+    # masked (-inf) positions identical
+    masked = torch.isinf(lo_numba)
+    assert torch.equal(masked, torch.isinf(lo_scatter))
+
+    # finite logits agree to float32 reduction-order noise
+    max_diff = (lo_numba[~masked] - lo_scatter[~masked]).abs().max().item()
+    assert max_diff < 1e-4, f"numba vs scatter logits diverge by {max_diff:.2e}"
+
 if __name__ == "__main__":
     test_sample_outputs_are_valid_fine_triangulations()
     print("ok  test_sample_outputs_are_valid_fine_triangulations")
     test_sample_outputs_tile_without_gaps_or_overlaps()
     print("ok  test_sample_outputs_tile_without_gaps_or_overlaps")
     test_sampler_is_uniform_over_frts()
-    print("ok  test_sampler_is_uniform_over_frts\n\n3 passed")
+    print("ok  test_sampler_is_uniform_over_frts")
+    test_aggregation_paths_agree()
+    print("ok  test_aggregation_paths_agree\n\n4 passed")

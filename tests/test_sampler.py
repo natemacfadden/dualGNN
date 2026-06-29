@@ -23,9 +23,11 @@
 from collections import Counter
 
 import numpy as np
+import pytest
 
 # local imports
 from dualgnn import DualGraph, sample
+from dualgnn.geometry import canonical_simps
 from dualgnn.model import DualGNN
 
 
@@ -118,8 +120,61 @@ def test_sample_outputs_tile_without_gaps_or_overlaps():
                 assert not _interiors_overlap(tris[i], tris[j]), \
                     f"simps {i},{j} overlap"
 
+def _enumerate_frts(g):
+    """Every fine triangulation of g's polygon, as a set of canonical_simps
+    keys. A fine triangulation is exactly N_simps_per_ft pairwise-compatible
+    candidate simps: non-overlapping unimodular simps whose areas then sum to
+    the polygon area must tile it. Independent of the model and of CYTools."""
+    simps, compat, target = g.simps, g.simp_compat, g.N_simps_per_ft
+    n = len(simps)
+    out, clique = set(), []
+    def rec(start):
+        if len(clique) == target:
+            out.add(canonical_simps(simps[clique]).tobytes())
+            return
+        for i in range(start, n):
+            if all(compat[i][j] for j in clique):
+                clique.append(i)
+                rec(i + 1)
+                clique.pop()
+    rec(0)
+    return out
+
+def test_sampler_is_uniform_over_frts():
+    """
+    The headline claim - the trained sampler draws uniformly over fine
+    triangulations - as a CI gate (the review noted it was paper-only). On a
+    small polygon we enumerate every FRT independently, draw many samples with
+    the shipped REINFORCE-trained model at beta=1 (uniform-over-FRT), and
+    chi-square the empirical counts against uniform. A non-uniform sampler
+    drives the p-value down; the seed is fixed so the verdict is deterministic.
+    """
+    chisquare = pytest.importorskip("scipy.stats").chisquare
+
+    # 5-FRT triangle conv{(0,0),(0,2),(3,0)} - small enough to fully enumerate
+    pts = np.array([(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (2, 0), (3, 0)],
+                   dtype=np.int64)
+    g    = DualGraph(pts)
+    frts = _enumerate_frts(g)
+    assert len(frts) == 5            # known FRT count for this polygon
+
+    net = DualGNN.default()                          # shipped trained model
+    M   = 3000
+    fts = sample(net, g, Ntriangs=M, seed=0)         # beta=1 -> uniform-over-FRT
+
+    counts = Counter(
+        canonical_simps(np.asarray(ft, dtype=np.int64)).tobytes() for ft in fts
+    )
+    assert set(counts) == frts                       # every FRT hit, none extra
+
+    observed = np.array([counts[k] for k in frts])
+    _, p = chisquare(observed)                        # null: uniform over N bins
+    assert p > 0.01, f"sampler looks non-uniform: chi-square p={p:.4f}"
+
 if __name__ == "__main__":
     test_sample_outputs_are_valid_fine_triangulations()
     print("ok  test_sample_outputs_are_valid_fine_triangulations")
     test_sample_outputs_tile_without_gaps_or_overlaps()
-    print("ok  test_sample_outputs_tile_without_gaps_or_overlaps\n\n2 passed")
+    print("ok  test_sample_outputs_tile_without_gaps_or_overlaps")
+    test_sampler_is_uniform_over_frts()
+    print("ok  test_sampler_is_uniform_over_frts\n\n3 passed")

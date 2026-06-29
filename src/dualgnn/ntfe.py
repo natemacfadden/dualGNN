@@ -614,4 +614,11 @@ class _IncrementalLP:
 
     def witness(self) -> np.ndarray:
         """The current solve's interior point (the NTFE heights)."""
-        return np.array(self.h.getSolution().col_value)
+        sol = self.h.getSolution()
+        # invariant: the heights strictly satisfy every stacked inequality
+        # Hx>=1 (row_value is the activity Hx) - guards an LP/solver regression
+        # from handing back a spurious witness
+        rv = sol.row_value
+        assert len(rv) == 0 or min(rv) >= 1.0 - 1e-6, \
+            f"witness violates Hx>=1 (min activity {min(rv):.3g})"
+        return np.array(sol.col_value)

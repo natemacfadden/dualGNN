@@ -225,6 +225,17 @@ class _Layer(nn.Module):
             # min/max gradients across ties exactly as before (ties are
             # common -- symmetric nodes share hidden states -- and
             # segment_reduce's backward picks a different subgradient)
+            if (not torch.is_grad_enabled()
+                    and f.device.type not in ("cpu", "cuda")):
+                # MPS inference is disabled: scatter_reduce (amin/amax) is
+                # numerically unreliable on the MPS backend and biases the
+                # sampler (non-uniform draws). Path left in place; fail loudly
+                # rather than return wrong results. Run on CPU or CUDA.
+                raise NotImplementedError(
+                    f"dualGNN inference on device '{f.device.type}' is "
+                    "disabled (unreliable scatter_reduce on this backend). "
+                    "Use CPU or CUDA; see dualgnn.device.default_device."
+                )
             batch_size, Nsimps, D = f.shape
             f_sender = f_norm[:, src_sorted, :]
             idx   = dst_sorted.view(1, Nedges, 1).expand(batch_size,

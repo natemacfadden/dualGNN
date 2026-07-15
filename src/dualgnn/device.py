@@ -23,9 +23,18 @@ import torch
 
 
 def default_device() -> str:
-    """Best available accelerator: `"cuda"` -> `"mps"` -> `"cpu"`."""
+    """Best available accelerator: `"cuda"` -> `"cpu"`.
+
+    MPS is intentionally disabled for now: the message-passing aggregation
+    uses scatter_reduce (amin/amax), which is numerically unreliable on the
+    MPS backend and biases the sampler (non-uniform draws; caught on macOS by
+    test_sampler_is_uniform_over_frts). The model is tiny and memory-bound, so
+    CPU on Apple silicon is correct and fast enough. The MPS branch is left in
+    place below, disabled, and the model raises if MPS inference is forced.
+    """
     if torch.cuda.is_available():
         return "cuda"
-    if torch.backends.mps.is_available():
-        return "mps"
+    # MPS disabled (see docstring); falls back to CPU on Apple silicon.
+    # if torch.backends.mps.is_available():
+    #     return "mps"
     return "cpu"

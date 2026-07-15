@@ -15,12 +15,11 @@ dependencies = [
     "scipy",
     "numba",
     "torch>=2.7",
-    # LP solver: regularity check (is_regular) + NTFE pipeline. Capped <1.15:
-    # highspy>=1.15 references Highs::releaseMemory(), absent from the libhighs
-    # bundled by regfans (a CYTools dep), so the two collide at import when the
-    # training/NTFE stack is present (undefined-symbol ImportError). Verified:
-    # 1.14.0 works, 1.15.0 breaks. Lift once regfans ships a newer libhighs.
-    "highspy<1.15",
+    # LP solver for the regularity check (is_regular). Unpinned: highspy works
+    # standalone at any version; the only version constraint (matching ortools'
+    # bundled HiGHS, when the CYTools stack is present) is enforced by CYTools
+    # itself -- see the [train] extra's cytools>=1.4.12 floor.
+    "highspy",
 ]
 
 [project.urls]
@@ -37,9 +36,10 @@ Archive         = "https://doi.org/10.5281/zenodo.20622920"
 test = ["pytest"]
 # plotting for the tutorials and the GUI (scripts/visualize.py)
 viz = ["matplotlib"]
-# Training additionally needs CYTools (pulls pplpy/pypalp/python-flint/etc.),
-# polars for the data layer, and tensorboard for logging.
-train = ["cytools", "polars", "tensorboard"]
+# Training additionally needs CYTools (>=1.4.12: that release caps highspy to
+# match ortools' bundled HiGHS, so this package need not; pulls pplpy/pypalp/
+# python-flint/etc.), polars for the data layer, and tensorboard for logging.
+train = ["cytools>=1.4.12", "polars", "tensorboard"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

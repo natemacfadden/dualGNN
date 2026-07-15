@@ -66,6 +66,6 @@ KL and collision counts track the uniform reference as closely across the
 
 The paper's flip-distance autocorrelation diagnostic (fig. 14) needs a
 flip-graph implementation and is not bundled; see the paper for that
-methodology. For a richer runnable demo (rank-frequency plots,
-KL-vs-time against the bundled `grow2d`/`pushing` baselines), see
-[`uniformity/`](uniformity/).
+methodology. For a richer runnable demo (rank-frequency plots, per-sampler
+throughput (draws/s), and a KL-vs-time speed-vs-uniformity plot against the
+bundled `grow2d`/`pushing` baselines), see [`uniformity/`](uniformity/).

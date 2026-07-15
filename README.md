@@ -53,7 +53,7 @@ The model
 4) shows good inductive bias (generalizes zero shot), and
 5) is competitive in speed compared to the other tested samplers.
 
-Most of the performance is attributed to the inductive bias. See the paper.
+Most of the performance is attributed to the inductive bias. See the paper. Claim (5) is also partially checkable in-repo: [`eval/uniformity/`](eval/uniformity/) reports per-sampler throughput (draws/s) and a speed-vs-uniformity (`kl_vs_time`) plot against the bundled `grow2d`/`pushing` samplers.
 
 The major limitations are that this model was trained with $K=16$ message passing rounds - if the polygon of interest has $\mathrm{diam}(G)\gtrsim K$ then performance is expected to degrade. Additionally, while dualGNN enhances the sampling of *regular* triangulations generally, it does not only sample regular triangulations (irregulars sneak in). Neither issue inhibits use in practice - most polygons of interest have much smaller diameters and regularity is typically so prevalent that filtering on it is a good strategy.
 

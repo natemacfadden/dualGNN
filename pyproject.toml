@@ -15,7 +15,12 @@ dependencies = [
     "scipy",
     "numba",
     "torch>=2.7",
-    "highspy",    # LP solver: regularity check (is_regular) + NTFE pipeline
+    # LP solver: regularity check (is_regular) + NTFE pipeline. Capped <1.15:
+    # highspy>=1.15 references Highs::releaseMemory(), absent from the libhighs
+    # bundled by regfans (a CYTools dep), so the two collide at import when the
+    # training/NTFE stack is present (undefined-symbol ImportError). Verified:
+    # 1.14.0 works, 1.15.0 breaks. Lift once regfans ships a newer libhighs.
+    "highspy<1.15",
 ]
 
 [project.urls]
@@ -26,10 +31,10 @@ Paper           = "https://arxiv.org/abs/2605.27770"
 Archive         = "https://doi.org/10.5281/zenodo.20622920"
 
 [project.optional-dependencies]
-# tests/ need pytest; the NTFE tests additionally need CYTools, which is
-# pip-installable from PyPI and pulls its own native-lib wheels (pplpy,
-# pypalp, python-flint, ...).
-test = ["pytest", "cytools"]
+# Core test surface needs only pytest. The NTFE tests additionally need
+# CYTools (in [train]); they are exercised by a dedicated CI job that installs
+# .[test,train] -- the core matrix stays light and CYTools-free.
+test = ["pytest"]
 # plotting for the tutorials and the GUI (scripts/visualize.py)
 viz = ["matplotlib"]
 # Training additionally needs CYTools (pulls pplpy/pypalp/python-flint/etc.),

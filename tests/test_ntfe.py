@@ -17,9 +17,9 @@
 #
 # -----------------------------------------------------------------------------
 # Description:  End-to-end test of the 4D NTFE pipeline (sample_ntfes).
-#               Needs CYTools (pip-installable; see the [test]/[train]
-#               extras). Always runs -- a missing CYTools is a real failure
-#               here, not a skip.
+#               Needs CYTools (in the [train] extra). Runs in the dedicated
+#               `ntfe` CI job (`pip install .[test,train]`); a missing CYTools
+#               is a real failure here, not a skip.
 # -----------------------------------------------------------------------------
 
 # external imports

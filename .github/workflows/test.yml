@@ -31,5 +31,23 @@ jobs:
         run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Install package
         run: pip install -e .[test]
+      # NTFE tests need CYTools; they run in the dedicated `ntfe` job below so
+      # the core matrix stays light and free of the CYTools/highspy stack.
       - name: Run tests
-        run: pytest tests/ -q
+        run: pytest tests/ --ignore=tests/test_ntfe.py -q
+
+  ntfe:
+    name: pytest NTFE (ubuntu, py3.13, CYTools)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install CPU torch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      # .[train] pulls CYTools (+ polars, tensorboard); .[test] adds pytest
+      - name: Install package + training/NTFE stack
+        run: pip install -e .[test,train]
+      - name: Run NTFE tests
+        run: pytest tests/test_ntfe.py -q

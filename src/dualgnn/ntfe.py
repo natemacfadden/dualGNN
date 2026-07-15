@@ -502,7 +502,7 @@ class _FaceIneqs:
     def __getitem__(self, k: int) -> np.ndarray:
         k = int(k)
         if k not in self._memo:
-            # lazy: cytools is conda-only and not needed for the 2D path
+            # lazy import: cytools is not needed for the 2D path
             from cytools.ntfe.ntfe import _2d_frt_cone_ineqs
             triang = self.face_poly.triangulate(
                 simplices=self.s2l[self.pool[k]].tolist(),

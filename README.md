@@ -88,12 +88,11 @@ For inference (sampling with the shipped model):
 ```
 pip install dualgnn
 ```
-The model checkpoints ship inside the package. By default this pulls the standard PyTorch build, which on Linux bundles CUDA (a multi-GB download); on a CPU-only or Apple-silicon machine, install the matching wheel first (e.g. `pip install torch --index-url https://download.pytorch.org/whl/cpu`) then `pip install dualgnn`. The tutorials' plotting and the GUI additionally need matplotlib (`pip install dualgnn[viz]`); the NTFE pipeline additionally needs CYTools from the conda environment below.
+The model checkpoints ship inside the package. By default this pulls the standard PyTorch build, which on Linux bundles CUDA (a multi-GB download); on a CPU-only or Apple-silicon machine, install the matching wheel first (e.g. `pip install torch --index-url https://download.pytorch.org/whl/cpu`) then `pip install dualgnn`. The tutorials' plotting and the GUI additionally need matplotlib (`pip install dualgnn[viz]`); the NTFE pipeline additionally needs CYTools (`pip install dualgnn[train]`).
 
-For training (and development), use the conda environment -- the training pipeline needs CYTools, which pip cannot install (`pip install dualgnn[train]` fails on purpose and points you here):
+For training (and development), which additionally needs CYTools, polars, and tensorboard:
 ```
-conda env create -f environment.yml
-conda activate dualgnn
+pip install dualgnn[train]
 ```
 
 ## Inference
@@ -183,7 +182,7 @@ independent across calls the way fresh-pool runs are.)
 
 ## Train end-to-end
 
-> **Requires the conda environment** (`environment.yml`) -- these scripts import CYTools, which pip cannot provide.
+> **Requires the training extras** (`pip install dualgnn[train]`) -- these scripts import CYTools, polars, and tensorboard.
 
 Three commands -- generate polygons, supervised train, REINFORCE fine-tune:
 
@@ -246,7 +245,7 @@ src/dualgnn/          library code (DualGraph, DualGNN, sampler, training)
 src/dualgnn/ckpts/    shipped checkpoints, packaged as data (D32K16 SFT,
                       D32K16 + REINFORCE = DualGNN.default())
 scripts/              CLI entry points (train, reinforce, harvest, make_polygons, visualize)
-tests/                pytest suite (pip surface; NTFE tests need the conda env)
+tests/                pytest suite (NTFE tests need CYTools: pip install .[test])
 tutorials/            inference, NTFE demos (Colab-ready)
 eval/                 benchmark polygons, uniformity-scoring protocol, demo
 docs/                 paper, figures, GUI demo gif, Hugging Face model card

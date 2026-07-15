@@ -26,16 +26,16 @@ from datetime import datetime, timezone
 from pathlib  import Path
 
 # local imports
-# (training pulls in CYTools which is conda only... fail with guidance)
+# (training pulls in CYTools/polars/tensorboard... fail with guidance)
 try:
     from dualgnn.training import reinforce
 except ImportError as e:
     import sys
     sys.exit(
-        "dualGNN training requires the conda environment (CYTools + native "
-        "libs ppl/normaliz/python-flint), which pip cannot install. Set it up "
-        "with:\n    conda env create -f environment.yml\n"
-        "(pip installs are inference-only.)\n"
+        "dualGNN training requires the training extras (CYTools, polars, "
+        "tensorboard). Install them with:\n"
+        "    pip install dualgnn[train]\n"
+        "(a bare pip install is inference-only.)\n"
         f"[original import error: {e}]"
     )
 

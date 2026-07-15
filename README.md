@@ -16,6 +16,23 @@ This repo contains a small **graph-neural-network** sampler for **fine regular t
 
 These [FRTs are useful in string theory](https://arxiv.org/abs/2309.10855). More generally, they are a combinatorial population to sample from with nontrivial local and global constraints. At the time of writing this, the 'dualGNN' model in this repo is the most uniform sampler tested for polygons up to $\sim10^{20}$ triangulations.
 
+## Quick start
+
+```
+pip install dualgnn
+```
+On a CPU-only or Apple-silicon machine install a CPU torch wheel first (the
+default pulls a multi-GB CUDA build) -- see [Installation](#installation).
+
+```python
+import numpy as np
+from dualgnn import sample_frts
+
+pts = np.array([[x, y] for x in range(5) for y in range(5)], dtype=np.int64)  # [0,4]^2
+fts = sample_frts(pts, 8)   # up to 8 unique FRTs
+```
+More in [Inference](#inference); training in [Train end-to-end](#train-end-to-end).
+
 ## Model
 
 The idea is to represent a triangulation $\mathcal{T}_i$ by its [dual graph](https://en.wikipedia.org/wiki/Dual_graph): nodes are simplices $\sigma_a\in\mathcal{T}_i$ and edges are drawn between adjacent simplices. By combining into $G$ the dual graphs of all fine triangulations (if the same simplex $\sigma_a$ is in another triangulation $\mathcal{T}_j$, merge the nodes), one can view the problem as selecting an appropriate subgraph from $G$. We do so autoregressively, adding simplices 1-by-1 to the subgraph through

@@ -26,17 +26,15 @@ Paper           = "https://arxiv.org/abs/2605.27770"
 Archive         = "https://doi.org/10.5281/zenodo.20622920"
 
 [project.optional-dependencies]
-# tests/ need pytest; the package itself suffices for inference
-test = ["pytest"]
+# tests/ need pytest; the NTFE tests additionally need CYTools, which is
+# pip-installable from PyPI and pulls its own native-lib wheels (pplpy,
+# pypalp, python-flint, ...).
+test = ["pytest", "cytools"]
 # plotting for the tutorials and the GUI (scripts/visualize.py)
 viz = ["matplotlib"]
-# Training additionally needs CYTools + its native libraries (ppl, normaliz,
-# python-flint), none of which are pip-installable, plus polars for the data
-# layer. Use the conda environment:
-#     conda env create -f environment.yml
-# The sentinel below makes `pip install .[train]` fail loudly at resolve time
-# rather than leave someone with a half-working (CYTools-less) setup.
-train = ["dualgnn-training-is-conda-only-see-environment-yml"]
+# Training additionally needs CYTools (pulls pplpy/pypalp/python-flint/etc.),
+# polars for the data layer, and tensorboard for logging.
+train = ["cytools", "polars", "tensorboard"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

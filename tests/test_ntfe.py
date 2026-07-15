@@ -17,16 +17,16 @@
 #
 # -----------------------------------------------------------------------------
 # Description:  End-to-end test of the 4D NTFE pipeline (sample_ntfes).
-#               Needs CYTools, which is conda-only, so the whole module
-#               skips under a pip-only install (and in CI); run it from the
-#               conda env (`conda env create -f environment.yml`).
+#               Needs CYTools (pip-installable from git; see the [train]
+#               extra / environment.yml). Always runs -- a missing CYTools
+#               is a real failure here, not a skip.
 # -----------------------------------------------------------------------------
 
 # external imports
 import numpy as np
 import pytest
 
-cytools = pytest.importorskip("cytools")
+import cytools
 
 # local imports
 from dualgnn.model import DualGNN

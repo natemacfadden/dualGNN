@@ -75,13 +75,13 @@ the only other sampler that reaches it; `pushing`/`grow2d`/`fast` are quicker bu
 
 ![KL vs sample time, zero-shot on [0,4]^2](https://raw.githubusercontent.com/natemacfadden/dualGNN/main/docs/figures/fig10_zeroshot_pareto.png)
 
-**Most uniform across many polygons.** Over $200{,}000$ samples on $20$ held-out polygons
+**Uniformity holds across many polygons.** Over $200{,}000$ samples on $20$ held-out polygons
 ($11 \le N_\mathrm{pts} \le 18$), dualGNN is the most uniform sampler tested at every size,
 tying `flip_walk` only at $N_\mathrm{pts}=18$ while being $\sim4\times$ faster.
 
 ![multi-polygon uniformity](https://raw.githubusercontent.com/natemacfadden/dualGNN/main/docs/figures/fig13_multipoly_uniformity.png)
 
-**No sample autocorrelation.** A good sampler's draws should be as far apart as independent
+**Samples decorrelate immediately.** A good sampler's draws should be as far apart as independent
 uniform draws. Plotting the flip distance between samples $k$ apart, normalized against that
 uniform baseline, dualGNN matches uniform ($0$) at every lag while `flip_walk`'s nearby
 samples are correlated (closer together) until about $k=20$.

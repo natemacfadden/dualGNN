@@ -25,3 +25,21 @@ jobs:
             echo "::error::Version drift: pyproject=$PYPROJECT_V vs CITATION.cff=$CFF_V"
             exit 1
           fi
+
+  model-card-drift:
+    name: HF model card drift gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/hf_model_card.md matches the Hugging Face hub card
+        run: |
+          curl -sSfL --retry 3 --retry-delay 5 \
+            https://huggingface.co/natemacfadden/dualGNN/raw/main/README.md \
+            -o /tmp/hub_card.md
+          # strict content match; CRs and trailing-newline differences normalized
+          # (the HF web editor saves without a final newline)
+          if ! diff -u <(printf '%s\n' "$(sed -e 's/\r$//' docs/hf_model_card.md)") \
+                       <(printf '%s\n' "$(sed -e 's/\r$//' /tmp/hub_card.md)"); then
+            echo "::error::docs/hf_model_card.md has drifted from the HF hub card -- sync one to the other"
+            exit 1
+          fi
